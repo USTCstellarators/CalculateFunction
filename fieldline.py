@@ -7,6 +7,8 @@ from scipy.optimize import minimize
 from simsopt.geo.curverzfourier import CurveRZFourier
 from numpy import arctan
 from mpl_toolkits.mplot3d import Axes3D
+from simsopt.geo import CurveXYZFourier
+from scipy.optimize import curve_fit
 
 def nml_to_focus(nml_filename, focus_filename, nfp=2):
     import re
@@ -127,12 +129,11 @@ def tracingFULL(bfield, r0, z0, phi0=0.0, order=10,niter=100, nfp=1, nstep=1,Ful
             lines.append(np.array(po))
         else:
             lines.append(np.array(points))
-        lines=np.array(lines)
+        # lines=np.array(lines)
         # curve=rzp2curverz(lines=lines,order=order )
+    lines=np.array(lines)
     return lines
-from simsopt.geo import CurveXYZFourier
-from scipy.optimize import curve_fit
-import numpy as np
+
 
 def xyzp2curvexyz(points, order=10, nfp=1):
     """
@@ -536,43 +537,68 @@ def distance_cp(s, cs):
 
 if __name__ == "__main__":
     from simsopt._core import load, save
-    from simsopt.field import coils_to_focus
+    from simsopt.field import coils_to_focus, BiotSavart
     from simsopt.geo import SurfaceRZFourier,CurveXYZFourier,plot
     ID = 400049# ID可在scv文件中找到索引，以958为例
-    fID = ID // 1000 
+    fID = ID // 1000  
     [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
     cpcoils=from_simsopt(coils)
-    poincareplot(cpcoils,rz0=[1,0],len=0.1,show=True)
+    # poincareplot(cpcoils,rz0=[1,0],len=0.1,show=True)#磁轴位置x: [ 8.763e-01  4.552e-06]
+
+
+    def field(pos):
+        b=0
+        for i in range(len(coils)):
+            b+=cpcoils.data[i].bfield_HH(pos)
+        # print(pos,'->',b)
+        return b
+
+    axlist=tracingFULL(field,[8.763e-01],[4.552e-06],niter=1,nstep=360)
+    # print(type(axlist))
+    # print(axlist)
+    ma=rzp2curverz(axlist)
+
+    axlist2=tracingFULL(field,[0.95],[0.1],niter=1,nstep=360)
+    # print(type(axlist))
+    # print(axlist)
+    line2=rzp2curverz(axlist2)
+
+    axlist3=tracingFULL(field,[0.86],[0],niter=1,nstep=360)
+    # print(type(axlist))
+    # print(axlist)
+    line3=rzp2curverz(axlist3)
+    from simsopt.geo import plot
+
+    plot([line3,ma])
+
+
+    # from coilpy.surface import FourSurf
+    # surf=surfaces[-1]
+    # surf=surf.to_RZFourier()
+    # #surf.change_resolution(12,12)
+    # surf.write_nml('temp.nml')
+
+    # nml_to_focus("temp.nml", "temp.boundary", nfp=surf.nfp)
+    # boundary=FourSurf.read_focus_input("temp.boundary")
 
 
 
-    from coilpy.surface import FourSurf
-    surf=surfaces[-1]
-    surf=surf.to_RZFourier()
-    #surf.change_resolution(12,12)
-    surf.write_nml('temp.nml')
+    # import plotly.graph_objects as go
+    # fig = go.Figure()
+    # boundary.plot3d(engine='plotly', fig=fig,show=False)
+    # cpcoils.plot(engine='plotly', fig=fig,show=False)
 
-    nml_to_focus("temp.nml", "temp.boundary", nfp=surf.nfp)
-    boundary=FourSurf.read_focus_input("temp.boundary")
+    # fig.update_layout(
+    #     scene=dict(
+    #         aspectmode='data',
+    #         xaxis = dict(showbackground=False,visible=False),
+    #         yaxis = dict(showbackground=False,visible=False),
+    #         zaxis = dict(showbackground=False,visible=False),
+    #         bgcolor='rgba(0,0,0,0)',
+    #     )
+    # )
 
-
-
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    boundary.plot3d(engine='plotly', fig=fig,show=False)
-    cpcoils.plot(engine='plotly', fig=fig,show=False)
-
-    fig.update_layout(
-        scene=dict(
-            aspectmode='data',
-            xaxis = dict(showbackground=False,visible=False),
-            yaxis = dict(showbackground=False,visible=False),
-            zaxis = dict(showbackground=False,visible=False),
-            bgcolor='rgba(0,0,0,0)',
-        )
-    )
-
-    fig.write_html('focus.html')
+    # fig.write_html('focus.html')
 
 
 
