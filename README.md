@@ -6,4 +6,4 @@ fieldarg: 计算磁场参数
 
 fieldline: 磁力线计算
 
-function: 用于检验QUASR数据是否计算正确的benchmark
+function: 接受线圈形状系数用于评估线圈性能的函数
