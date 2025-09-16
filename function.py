@@ -1,3 +1,76 @@
+def generate_coils(curve_input, currents, nfp=1, stellsym=False):
+    """
+    根据 curve_input 与 currents 生成带对称性的 coils 对象。
+    
+    参数
+    ----
+    curve_input : (k,N)、(k,3,N) numpy.ndarray 或 CurveXYZFourier/list
+        - (k,N): k 根线圈的 DOF，每根线圈已按 simsopt 的 dofs 顺序拼好
+        - (k,3,N): k 根线圈，3 表示 x/y/z，最后一维按 [c0, s1, c1, ...] 排列
+        - CurveXYZFourier 或 其列表：直接使用
+    currents : array-like, shape (k,)
+        每根线圈的电流
+    nfp : int
+        poloidal field periods
+    stellsym : bool
+        是否施加 stellarator 对称
+    
+    返回
+    ----
+    coils : simsopt.field.BiotSavart
+        可直接用于 Biot–Savart 计算的 coils 对象
+    """
+    import numpy as np
+    from simsopt.geo import CurveXYZFourier
+    from simsopt.field import coils_via_symmetries, Current
+
+    # ---- 兼容各种输入 ----
+    def _to_curves(curve_input, currents):
+        """内部：把输入统一成 [CurveXYZFourier], [Current], k, order"""
+        if isinstance(curve_input, CurveXYZFourier):
+            base_curves = [curve_input]
+            order = curve_input.order
+            return base_curves, [Current(float(currents[0] if np.ndim(currents) else currents))], 1, order
+
+        if isinstance(curve_input, (list, tuple)) and len(curve_input) and isinstance(curve_input[0], CurveXYZFourier):
+            order = curve_input[0].order
+            return list(curve_input), [Current(float(c)) for c in currents], len(curve_input), order
+
+        arr = np.asarray(curve_input)
+        if arr.ndim == 2:      # (k, N)
+            k, N = arr.shape
+            order = int((N - 3) // 6) if N > 3 else 0
+            quad = max(1, 15 * order)
+            curves = []
+            for i in range(k):
+                c = CurveXYZFourier(quadpoints=quad, order=order)
+                c.set_dofs(arr[i])
+                curves.append(c)
+            return curves, [Current(float(c)) for c in currents], k, order
+
+        if arr.ndim == 3:      # (k, 3, 2*m+1)
+            k, xyz, N = arr.shape
+            if xyz != 3:
+                raise ValueError("curve_input shape must be (k,3,N)")
+            order = (N - 1) // 2
+            quad = max(1, 15 * order)
+            curves = []
+            for i in range(k):
+                dofs = np.concatenate([arr[i, 0, :], arr[i, 1, :], arr[i, 2, :]])
+                c = CurveXYZFourier(quadpoints=quad, order=order)
+                c.set_dofs(dofs)
+                curves.append(c)
+            return curves, [Current(float(c)) for c in currents], k, order
+
+        raise TypeError("curve_input must be CurveXYZFourier, (k,N) or (k,3,N) array")
+
+    base_curves, base_currents, k, coilorder = _to_curves(curve_input, currents)
+    print(f"generate_coils: {k} coils, order={coilorder}")
+    print("currents:", [c for c in currents])
+
+    # ---- 生成带对称性的 coils ----
+    coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym)
+    return coils
 
 
 def coil_surface_to_para(surfaces,curve_input,currents):
@@ -277,7 +350,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=[0.9,0], plot=True):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=[0.9,0], plot=False):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -293,39 +366,16 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     from simsopt.geo import (SurfaceRZFourier,plot,QfmResidual,CurveXYZFourier,boozer_surface_residual,SurfaceXYZTensorFourier, 
                             BoozerSurface,MajorRadius, CurveLength, NonQuasiSymmetricRatio, Iotas,Volume,Area)
     from simsopt.field import BiotSavart, coils_via_symmetries,Current
+    # 如果 generate_coils 不在同一文件，请在此处导入：
+    # from your_module import generate_coils
 
     surfaceorder=4
-    if hasattr(curve_input, '__len__') and hasattr(currents, '__len__'):
-        if len(curve_input) != len(currents):
-            raise ValueError(f"curve_input 和 currents 长度不一致: len(curve_input) = {len(curve_input)}, len(currents) = {len(currents)}")
-    else:
-        raise TypeError("curve_input 和 currents 应为可迭代对象（如列表、数组等）")
-    
-    #生成线圈
+
+    # 生成线圈（仅改动这里）
     start_time = time.time()
-    if not isinstance(curve_input[0], (CurveXYZFourier)):
-        print("curve_input is not CurveXYZFourier, converting to CurveXYZFourier")
-        curve_input=np.array(curve_input)
-        (k,N)=curve_input.shape
-        print(k)
-        coilorder=int((N-3)/6)
-        numquadpoints = 15 * coilorder
-        base_curves = [CurveXYZFourier(quadpoints=numquadpoints, order=coilorder) for _ in range(k)]
-        for i in range(k):
-            base_curves[i].x= curve_input[i]
-            base_curves[i].set_dofs(base_curves[i].x)
-        base_currents= [Current(c) for c in currents]
-
-    else:
-        print("curve_input is CurveXYZFourier, using it directly")
-        base_curves = curve_input.copy()
-        k = len(base_curves)
-        coilorder = base_curves[0].order
-        base_currents= [Current(c) for c in currents]
-
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     print([c for c in currents])
-    coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym)
-    print([c.current.get_value() for c in coils])
+
 	#biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
     current_sum = sum(i for i in currents)

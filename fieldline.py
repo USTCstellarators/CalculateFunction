@@ -413,7 +413,71 @@ def fullax(coils,rz0=[1,0],phi0=0,bounds=None,order=10,**kwargs):
     return ma
 
 
+def findax_safe(coils,rz0=[[1,0],[0.5,0],[1.5,0]],phi0=0,bounds=None,**kwargs):
+    if bounds is None:
+        bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
 
+    # ---- 新增：安全封装，抓取 LSODA 的 "t+h=t" 告警 ----
+    import io, numpy as np
+    from contextlib import redirect_stdout
+    class _TraceStalled(RuntimeError):
+        pass
+    def _safe_tracing(field, R, Z, phi0, **kw):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lines = tracing(field, [R], [Z], niter=1, phi0=phi0, **kw)
+        out = buf.getvalue()
+        if ("lsoda--  warning..internal t (=r1) and h (=r2)" in out) or ("t + h = t" in out):
+            raise _TraceStalled("LSODA step-size underflow (t+h==t).")
+        return lines
+    # ---------------------------------------------------
+
+    def field(pos):
+        b=0
+        for i in range(len(coils)):
+            b+=coils.data[i].bfield_HH(pos)
+        return b
+
+    # ---- 支持多组 rz0：可传 [R,Z] 或 [[R1,Z1],[R2,Z2],...] ----
+    rz0_arr = np.asarray(rz0, dtype=float)
+    if rz0_arr.ndim == 1 and rz0_arr.size == 2:
+        seeds = [rz0_arr]
+    else:
+        seeds = [np.asarray(s, float) for s in rz0_arr]
+    # ---------------------------------------------------
+
+    last_err = None
+    for seed in seeds:
+        def fun(rz):
+            try:
+                lines = _safe_tracing(field, rz[0], rz[1], phi0, **kwargs)
+            except _TraceStalled as e:
+                # 打印原因并给大惩罚，优化器会避开；若该 seed 不行，外层会换下一个
+                print(f"tracing 警告/卡死, rz = {rz}: {e}")
+                return 1e6
+            except Exception as e:
+                print(f"tracing 失败, rz = {rz}，错误: {e}")
+                return 1e6
+            r=(lines[0][1][0]-rz[0])**2+(lines[0][1][1]-rz[1])**2
+            lines=None
+            return r
+
+        try:
+            res=minimize(fun, seed, method='L-BFGS-B', bounds=bounds)
+        except Exception as e:
+            print(f"minimize 异常，seed={seed}，错误: {e}")
+            last_err = e
+            continue
+
+        print(res)
+        if res.success and np.isfinite(res.fun):
+            return res.x
+        last_err = RuntimeError(f"optimizer failed: {res.message if hasattr(res,'message') else 'unknown'}")
+
+    # 所有 seed 都失败
+    if last_err is not None:
+        raise last_err
+    raise RuntimeError("findax: all seeds failed.")
 
 
 def findax(coils,rz0=[1,0],phi0=0,bounds=None,**kwargs):
