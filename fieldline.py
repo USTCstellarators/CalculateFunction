@@ -10,6 +10,12 @@ from mpl_toolkits.mplot3d import Axes3D
 from simsopt.geo import CurveXYZFourier
 from scipy.optimize import curve_fit
 
+def findrz0(coils):
+    x=0.3*max(coils.data[0].x)+0.7*min(coils.data[0].x)
+    y=0.3*max(coils.data[0].y)+0.7*min(coils.data[0].y)
+    print('rz0=',np.sqrt(x**2+y**2))
+    return np.sqrt(x**2+y**2)
+
 def nml_to_focus(nml_filename, focus_filename, nfp=2):
     import re
     """
@@ -373,9 +379,11 @@ def loadcurve(filename='rz.npz'):
 
 
 
-def fullax(coils,rz0=[1,0],phi0=0,bounds=None,order=10,**kwargs):
+def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=2,**kwargs):
     #if bounds is None:
         #bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
+    if rz0==None:
+        rz0=[findrz0(coils),0]
     def field(pos):
         b=0
         for i in range(len(coils)):
@@ -389,11 +397,25 @@ def fullax(coils,rz0=[1,0],phi0=0,bounds=None,order=10,**kwargs):
             return 1e6  # 惩罚项，优化器会避开这组参数
 
         try:
-            lines = tracing(field, [rz[0]], [rz[1]], niter=1, phi0=phi0, **kwargs)
+            lines = tracing(field, [rz[0]], [rz[1]], niter=niter, phi0=phi0, **kwargs)
             if not np.all(np.isfinite(lines)):
                 print(f"tracing() 返回包含 nan 的轨迹, rz = {rz}")
                 return 1e6
-            r = (lines[0][1][0]-rz[0])**2 + (lines[0][1][1]-rz[1])**2
+            line = lines[0]
+            # # ⬇️ 可视化 tracing 的轨迹
+            # r_vals = [pt[0] for pt in line]
+            # z_vals = [pt[1] for pt in line]
+            
+            # plt.figure()
+            # plt.plot(r_vals, z_vals, label=f"rz = {rz}")
+            # plt.xlabel('r')
+            # plt.ylabel('z')
+            # plt.title(f'Tracing Line for rz = {rz}')
+            # plt.legend()
+            # plt.grid(True)
+            # plt.show()  # 阻塞直到窗口关闭
+            
+            r = (line[1][0] - rz[0])**2 + (line[1][1] - rz[1])**2
             return r
             #print(lines)
             #print(lines[0][1][0],rz[0],lines[0][1][1],rz[1])
@@ -416,7 +438,8 @@ def fullax(coils,rz0=[1,0],phi0=0,bounds=None,order=10,**kwargs):
 def findax_safe(coils,rz0=[[1,0],[0.5,0],[1.5,0]],phi0=0,bounds=None,**kwargs):
     if bounds is None:
         bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
-
+    if rz0==None:
+        rz0=[[findrz0(coils),0],[findrz0(coils)-0.1,0],[findrz0(coils)+0.1,0]]
     # ---- 新增：安全封装，抓取 LSODA 的 "t+h=t" 告警 ----
     import io, numpy as np
     from contextlib import redirect_stdout
@@ -480,9 +503,11 @@ def findax_safe(coils,rz0=[[1,0],[0.5,0],[1.5,0]],phi0=0,bounds=None,**kwargs):
     raise RuntimeError("findax: all seeds failed.")
 
 
-def findax(coils,rz0=[1,0],phi0=0,bounds=None,**kwargs):
+def findax(coils,rz0=None,phi0=0,bounds=None,**kwargs):
     if bounds is None:
         bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
+    if rz0==None:
+        rz0=[findrz0(coils),0]
     def field(pos):
         b=0
         for i in range(len(coils)):

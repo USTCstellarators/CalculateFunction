@@ -171,7 +171,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
 
 
 
-def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceorder=6,rz0=[0.9,0],max_attempts=1000,max_volume=2.418, residual_tol=1e-10):
+def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceorder=6,rz0=None,max_attempts=1000,max_volume=2.418, residual_tol=1e-10):
     '''
     输入k个傅里叶模数为n的线圈, 输出仿星器参数
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -350,7 +350,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=[0.9,0], plot=False):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None, plot=False):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -395,7 +395,8 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     # surf.least_squares_fit(surfRZ.gamma())
     surf.fit_to_curve(ma, 0.005, flip_theta=True)
     volume = Volume(surf)
-    vol_target=volume.J()
+    # vol_target=volume.J()
+    vol_target=-0.0001
     boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
     res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
 
