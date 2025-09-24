@@ -404,10 +404,11 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     qs_error=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J()
 
     haveaxis = False
-    if abs(iota)<1:
+    residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
+    if residual_norm<1e-9:
         haveaxis = True
     end_time = time.time()
-    residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
+    
     print(f" iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
 
     if plot:
