@@ -13,6 +13,7 @@ import os
 from simsopt.field import (InterpolatedField, coils_via_symmetries, SurfaceClassifier,
                            compute_fieldlines, LevelsetStoppingCriterion, plot_poincare_data)
 import time
+from simsopt.mhd import Vmec
 
 def findrz0(coils):
     x=0.3*max(coils.data[0].x)+0.7*min(coils.data[0].x)
@@ -528,6 +529,64 @@ def findax(coils,rz0=None,phi0=0,bounds=None,**kwargs):
     res=minimize(fun,rz0,method='L-BFGS-B',bounds=bounds)
     print(res)
     return res.x
+
+def trace_fieldline_wout(filename):
+    vmec = Vmec(filename)
+    keys = vmec.wout.__dict__.keys()
+
+    ns   = vmec.wout.ns
+    nfp  = vmec.wout.nfp
+    #nfp = 1
+    s = -1
+    bsubu = vmec.wout.bsupumnc[:,s]
+    bsubv = vmec.wout.bsupvmnc[:,s]
+    bmnc  = vmec.wout.bmnc[:,s]
+    rmnc  = vmec.wout.rmnc[:,s]
+    zmns  = vmec.wout.zmns[:,s]
+    raxis_cc = vmec.wout.raxis_cc
+
+
+    # 对于形状的傅里叶展开系数
+    xm    = vmec.wout.xm
+    xn    = vmec.wout.xn
+
+    # 对于B field的Nyquist频率
+    xm_nyq = vmec.wout.xm_nyq
+    xn_nyq = vmec.wout.xn_nyq
+
+
+    # 获得最外层磁面的磁场大小
+    def B_surface():
+        B_surface = 0
+        theta = np.linspace(0,2*np.pi,1000)
+        zeta  = np.linspace(0,2*np.pi,1000)
+        t2,z2 = np.meshgrid(theta,zeta)
+        nfp = 1
+        for jmn in range(len(xm_nyq)):
+            m = xm_nyq[jmn]
+            n = xn_nyq[jmn]
+            angle = m * t2 - n * nfp * z2
+            B_surface += bmnc[jmn] * np.cos(angle)
+        return B_surface.T
+
+
+
+    R_2D = np.zeros((1000 , 1000 ))
+    Z_2D = np.zeros((1000 , 1000 ))
+    phi1d   = np.linspace(0, 2*np.pi,1000   ,endpoint=True)
+    theta1d = np.linspace(0, 2*np.pi,1000   ,endpoint=True)
+    p2,t2   = np.meshgrid(phi1d,theta1d)
+    for jmn in range(len(xm)):
+            m = xm[jmn]
+            n = xn[jmn]
+            angle = m * t2 - n * p2
+            R_2D += rmnc[jmn] * np.cos(angle)
+            Z_2D += zmns[jmn] * np.sin(angle)
+
+    # X, Y, Z arrays for the whole surface
+    x_2D_plot = R_2D * np.cos(phi1d)
+    y_2D_plot = R_2D * np.sin(phi1d)
+    z_2D_plot = Z_2D
 
 def run_fieldline_tracing(curves, currents, ma, s, nfp=3, nfieldlines=10, tmax_fl=20000, degree=4, out_dir="./output/", save_data=True):
     #输入都是simsopt, ma可以尝试由fullax找
