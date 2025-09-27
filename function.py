@@ -131,24 +131,11 @@ def coil_surface_to_para(surfaces,curve_input,currents):
                             , CurveLength, NonQuasiSymmetricRatio, Iotas,Volume)
     from simsopt.field import BiotSavart, coils_via_symmetries,Current
 	#生成线圈
-    if not isinstance(curve_input[0], (CurveXYZFourier)):
-        print("curve_input is not CurveXYZFourier, converting to CurveXYZFourier")
-        curve_input=np.array(curve_input)
-        (k,N)=curve_input.shape
-        coilorder=int((N-3)/6)
-        numquadpoints = 15 * coilorder
-        base_curves = [CurveXYZFourier(quadpoints=numquadpoints, order=coilorder) for _ in range(k)]
-        for i in range(k):
-            base_curves[i].x= curve_input[i]
-    else:
-        base_curves = curve_input
-        k = len(base_curves)
-        coilorder = base_curves[0].order  
+    
 
     nfp=surfaces[-1].nfp
     stellsym=surfaces[-1].stellsym
-    base_currents= [Current(c) for c in currents]
-    coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym)
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
 	#biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
     current_sum = sum(i for i in currents)   
@@ -221,13 +208,14 @@ def coil_surface_to_para(surfaces,curve_input,currents):
 
 
 
-def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceorder=6,rz0=None,max_attempts=1000,max_volume=2.418, residual_tol=1e-10):
+def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceorder=6,rz0=None,max_attempts=1000,max_volume=2.418, residual_tol=1e-10,alpha=0.3):
     '''
     输入k个傅里叶模数为n的线圈, 输出仿星器参数
-    curve_input: (k, N) 或者CurveXYZFourier类
+    curve_input: (k, N) 或者CurveXYZFourier类    
     currents: (k,) 
     nfp: int
     stellsym: bool
+    alpha: float, alpha越大,步长越大
     '''
     import time
     import numpy as np
@@ -247,28 +235,8 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     
     #生成线圈
     main_start_time = time.time()
-    if not isinstance(curve_input[0], (CurveXYZFourier)):
-        print("curve_input is not CurveXYZFourier, converting to CurveXYZFourier")
-        curve_input=np.array(curve_input)
-        (k,N)=curve_input.shape
-        print(k)
-        coilorder=int((N-3)/6)
-        numquadpoints = 15 * coilorder
-        base_curves = [CurveXYZFourier(quadpoints=numquadpoints, order=coilorder) for _ in range(k)]
-        for i in range(k):
-            base_curves[i].x= curve_input[i]
-            base_curves[i].set_dofs(base_curves[i].x)
-        base_currents= [Current(c) for c in currents]
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
 
-    else:
-        print("curve_input is CurveXYZFourier, using it directly")
-        base_curves = curve_input.copy()
-        k = len(base_curves)
-        coilorder = base_curves[0].order
-        base_currents= [Current(c) for c in currents]
-
-    print([c for c in currents])
-    coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym)
     print([c.current.get_value() for c in coils])
 	#biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
@@ -321,7 +289,8 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
             print(f" iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
             
             # 检查是否收敛
-            if residual_norm > residual_tol:
+            diff=abs(final_vol - vol_target)/abs(vol_target) 
+            if residual_norm > residual_tol or diff > 0.01:
                 print(f"第 {attempt} 次发散")
                 surf.set_dofs(s_save)
                 vol_change=vol_change/2
@@ -330,14 +299,14 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
                 continue
 
             # 检查是否达到目标
-            elif abs(final_vol) > abs(max_volume):
-                qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
+            elif abs(vol_target) > abs(max_volume):
+                surf.set_dofs(s_save)
                 print("Volume 达到目标，结束尝试。")
                 break
 
             qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
 
-            volumetol = 0.3 * vol_change
+            volumetol = alpha * vol_change
             print('volumetol=',volumetol)
             print('vol_change=',vol_change)
             vol_change+=volumetol
@@ -351,7 +320,9 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
             attempt+=1
             continue
 
-
+    boozer_surface = BoozerSurface(bs, surf, volume, max_volume)
+    res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
+    qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
     residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     main_end_time = time.time()
     print(f"[最终结果] vol_target={vol_target:.4f} -> iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e}, 运行总时间：{main_end_time - main_start_time:.4f} 秒")
@@ -473,128 +444,24 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
 
 
 if __name__ == "__main__":
-    # #测试coil_to_para
-    # import numpy as np
-    # from simsopt.geo import plot
-    # from simsopt._core import load, save
-
-    # ID = 958# ID可在scv文件中找到索引，以958为例
-    # fID = ID // 1000 
-    # [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
-
-    # currents = [c.current.get_value() for c in coils]
-    # order=4
-    # print(surfaces[0].nfp)
-    # base_curves = [c.curve for c in coils]
-    # curve_input=[cur.x for cur in base_curves]
-    # print(curve_input)
-    # print(np.array(curve_input).shape)
-
-    # plasma_para,coil_para=coil_to_para(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6)
-
-    #测试coil_to_axis
+    #测试coil_to_para
     import numpy as np
     from simsopt.geo import plot
     from simsopt._core import load, save
 
-    ID = 958# ID可在scv文件中找到索引，以958为例 2408903
+    ID = 958# ID可在scv文件中找到索引，以958为例
     fID = ID // 1000 
-    [surfaces, coils] = load(f'../simsopt_serials/{fID:04}/serial{ID:07}.json')
+    [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
 
     currents = [c.current.get_value() for c in coils]
     order=4
+    print(surfaces[0].nfp)
     base_curves = [c.curve for c in coils]
     curve_input=[cur.x for cur in base_curves]
-    print('nfp',surfaces[0].nfp)
-    # print(curve_input)
-    # print(np.array(curve_input).shape)
+    print(curve_input)
+    print(np.array(curve_input).shape)
 
-
-
-
-
-    def nml_to_focus(nml_filename, focus_filename, nfp=2):
-        import re
-        """
-        从 VMEC .nml 文件中提取 RBC/ZBS 的 (n, m) 项，自动计算 bmn,写入 FOCUS 所需的 .boundary 文件。
-
-        参数:
-            nml_filename: str, 输入的 .nml 文件路径
-            focus_filename: str, 输出的 .boundary 文件路径
-            nfp (int): 磁场周期数
-        """
-        with open(nml_filename, 'r') as f:
-            text = f.read()
-
-        # 提取 NFP 值
-        nfp_match = re.search(r'NFP\s*=\s*(\d+)', text, re.IGNORECASE)
-        if not nfp_match:
-            raise ValueError("NFP 未在 NML 文件中找到。")
-        nfp = int(nfp_match.group(1))
-
-        # 正则提取所有 RBC 和 ZBS 项 (n, m)
-        rbc_pattern = re.findall(r'RBC\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
-        zbs_pattern = re.findall(r'ZBS\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
-
-        # 构建 {(n, m): value} 字典
-        rbc_dict = {(int(n), int(m)): float(val) for n, m, val in rbc_pattern}
-        zbs_dict = {(int(n), int(m)): float(val) for n, m, val in zbs_pattern}
-
-        # 所有键组合
-        all_keys = sorted(set(rbc_dict.keys()) | set(zbs_dict.keys()), key=lambda x: (x[1], x[0]))
-
-        bmn = len(all_keys)
-
-        # 写入 .boundary 文件
-        with open(focus_filename, 'w') as f:
-            f.write("# bmn   bNfp   nbf\n")
-            f.write(f"{bmn:3d} \t {nfp} \t 0\n")
-            f.write("# Plasma boundary\n")
-            f.write("# n m Rbc Rbs Zbc Zbs\n")
-            for n, m in all_keys:
-                rbc = rbc_dict.get((n, m), 0.0)
-                zbs = zbs_dict.get((n, m), 0.0)
-                f.write(f"{n:5d} {m:5d} {rbc: .15E}  0.000000000000000E+00  0.000000000000000E+00  {zbs: .15E}\n")
-
-        print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
-
-
-
-    surf=surfaces[-1]
-
-    surf=surf.to_RZFourier()
-    #surf.change_resolution(12,12)
-    surf.write_nml('temp.nml')
-
-
-
-
-    from coilpy.surface import FourSurf
-
-
-
-
-    nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
-
-
-
-    def coil_to_curves_currents(coils):
-        from simsopt.geo import CurveXYZFourier
-        curves = []
-        currents = []
-        for c in coils:
-            if isinstance(c.curve, CurveXYZFourier):
-                curves.append(c.curve)
-                currents.append(c.current)
-            else:
-                pass
-                #curves.append(c.curve.curve)
-        return curves,currents
-    [curves,currents] = coil_to_curves_currents(coils)
-
-    print(surfaces[0].nfp)
-    from simsopt.field import coils_to_focus
-    coils_to_focus('poincare.focus',curves, currents, nfp=surfaces[0].nfp,stellsym=True)
+    plasma_para,coil_para=coil_to_para(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6)
 
 
 
@@ -604,47 +471,50 @@ if __name__ == "__main__":
 
 
 
+    # #测试coil_to_axis
+    # import numpy as np
+    # from simsopt.geo import plot
+    # from simsopt._core import load, save
 
+    # ID = 958# ID可在scv文件中找到索引，以958为例 2408903
+    # fID = ID // 1000 
+    # [surfaces, coils] = load(f'../simsopt_serials/{fID:04}/serial{ID:07}.json')
 
+    # currents = [c.current.get_value() for c in coils]
+    # order=4
+    # base_curves = [c.curve for c in coils]
+    # curve_input=[cur.x for cur in base_curves]
+    # print('nfp',surfaces[0].nfp)
+    # # print(curve_input)
+    # # print(np.array(curve_input).shape)
 
+    # # 保存
 
-
-
-
-
-
-
-    haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
-
-    print(haveaxis)
-    print(iota)
-    print(qs_error)
-
-
+    # from mymisc import nml_to_focus
 
     # surf=surfaces[-1]
 
     # surf=surf.to_RZFourier()
     # #surf.change_resolution(12,12)
     # surf.write_nml('temp.nml')
+
     # from coilpy.surface import FourSurf
-    # from fieldline import nml_to_focus
+
+    # nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
+
+    # print('nfp',surfaces[0].nfp)
     # from simsopt.field import coils_to_focus
-    # from simsopt.geo import surfacerzfourier,CurveXYZFourier,plot
-    # nml_to_focus("temp.nml", "958.boundary", nfp=surf.nfp)
-    # def coil_to_curves_currents(coils):
-    #     curves = []
-    #     curents = []
-    #     for c in coils:
-    #         if isinstance(c.curve, CurveXYZFourier):
-    #             curves.append(c.curve)
-    #             curents.append(c.current)
-    #         else:
-    #             pass
-    #             #curves.append(c.curve.curve)
-    #     return curves,curents
-    # [curves,currents] = coil_to_curves_currents(coils)
-    # coils_to_focus('full_step1.focus',curves, currents, nfp=2,stellsym=True, Ifree=True, Lfree=True)
+    # coils_to_focus('poincare.focus', curves=[c.curve for c in coils], currents=[c.current for c in coils], nfp=surfaces[0].nfp, stellsym=True)
+
+
+    # # 测试
+
+    # haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
+
+    # print(haveaxis)
+    # print(iota)
+    # print(qs_error)
+
 
 
 
