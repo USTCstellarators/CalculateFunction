@@ -1,75 +1,125 @@
 def generate_coils(curve_input, currents, nfp=1, stellsym=False):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
-    
-    参数
-    ----
-    curve_input : (k,N)、(k,3,N) numpy.ndarray 或 CurveXYZFourier/list
-        - (k,N): k 根线圈的 DOF，每根线圈已按 simsopt 的 dofs 顺序拼好
-        - (k,3,N): k 根线圈，3 表示 x/y/z，最后一维按 [c0, s1, c1, ...] 排列
-        - CurveXYZFourier 或 其列表：直接使用
-    currents : array-like, shape (k,)
-        每根线圈的电流
-    nfp : int
-        poloidal field periods
-    stellsym : bool
-        是否施加 stellarator 对称
-    
-    返回
-    ----
-    coils : simsopt.field.BiotSavart
-        可直接用于 Biot–Savart 计算的 coils 对象
+    支持两种用法：
+      A) curve_input = 基线圈列表(k_base)，currents = k_base
+      B) curve_input = 已展开后的全部线圈(k_full)，currents = k_base
+         若满足 k_full == k_base * nfp * (2 if stellsym else 1)，自动复制电流
+
+    返回：coils（可用于 Biot–Savart）
     """
     import numpy as np
+    import numbers
     from simsopt.geo import CurveXYZFourier
-    from simsopt.field import coils_via_symmetries, Current
+    from simsopt.field import coils_via_symmetries, Current as SOCurrent
 
-    # ---- 兼容各种输入 ----
-    def _to_curves(curve_input, currents):
-        """内部：把输入统一成 [CurveXYZFourier], [Current], k, order"""
+    def _as_curve_list(curve_input):
+        # 统一出曲线列表，以及每根曲线的 order
         if isinstance(curve_input, CurveXYZFourier):
-            base_curves = [curve_input]
-            order = curve_input.order
-            return base_curves, [Current(float(currents[0] if np.ndim(currents) else currents))], 1, order
-
+            return [curve_input], curve_input.order
         if isinstance(curve_input, (list, tuple)) and len(curve_input) and isinstance(curve_input[0], CurveXYZFourier):
-            order = curve_input[0].order
-            return list(curve_input), [Current(float(c)) for c in currents], len(curve_input), order
-
+            return list(curve_input), curve_input[0].order
         arr = np.asarray(curve_input)
-        if arr.ndim == 2:      # (k, N)
+        if arr.ndim == 2:  # (k, N) dofs
             k, N = arr.shape
             order = int((N - 3) // 6) if N > 3 else 0
-            quad = max(1, 15 * order)
+            quad = max(1, 15 * max(order, 1))
             curves = []
             for i in range(k):
                 c = CurveXYZFourier(quadpoints=quad, order=order)
                 c.set_dofs(arr[i])
                 curves.append(c)
-            return curves, [Current(float(c)) for c in currents], k, order
-
-        if arr.ndim == 3:      # (k, 3, 2*m+1)
+            return curves, order
+        if arr.ndim == 3:  # (k, 3, 2*m+1)
             k, xyz, N = arr.shape
             if xyz != 3:
-                raise ValueError("curve_input shape must be (k,3,N)")
+                raise ValueError("curve_input shape 必须为 (k,3,N)")
             order = (N - 1) // 2
-            quad = max(1, 15 * order)
+            quad = max(1, 15 * max(order, 1))
             curves = []
             for i in range(k):
                 dofs = np.concatenate([arr[i, 0, :], arr[i, 1, :], arr[i, 2, :]])
                 c = CurveXYZFourier(quadpoints=quad, order=order)
                 c.set_dofs(dofs)
                 curves.append(c)
-            return curves, [Current(float(c)) for c in currents], k, order
+            return curves, order
+        raise TypeError("curve_input 必须是 CurveXYZFourier、(k,N) 或 (k,3,N) 数组")
 
-        raise TypeError("curve_input must be CurveXYZFourier, (k,N) or (k,3,N) array")
+    def _to_current_obj_list(vals):
+        """把电流元素统一成 simsopt 的 Current/ScaledCurrent/兼容对象列表（保留已是对象的情况）"""
+        arr = np.asarray(vals, dtype=object).ravel()
+        out = []
+        for c in arr:
+            if isinstance(c, numbers.Number) or (np.isscalar(c) and not isinstance(c, (str, bytes))):
+                out.append(SOCurrent(float(c)))
+                continue
+            has_get = hasattr(c, "get_value") and callable(getattr(c, "get_value"))
+            has_vjp = hasattr(c, "vjp") and callable(getattr(c, "vjp"))
+            if has_get and has_vjp:
+                out.append(c)
+                continue
+            try:
+                out.append(SOCurrent(float(c)))
+            except Exception as e:
+                raise TypeError(
+                    "currents 中的元素既不是数值，也不是 Current/ScaledCurrent 兼容对象，"
+                    f"并且无法转换为 float：{type(c)}"
+                ) from e
+        return out
 
-    base_curves, base_currents, k, coilorder = _to_curves(curve_input, currents)
-    print(f"generate_coils: {k} coils, order={coilorder}")
-    print("currents:", [c for c in currents])
+    # ---- 曲线表与数量 ----
+    base_curves, order = _as_curve_list(curve_input)
+    k = len(base_curves)
 
-    # ---- 生成带对称性的 coils ----
-    coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym)
+    # ---- 处理电流数量匹配 ----
+    curr_in = np.asarray(currents, dtype=object).ravel()
+    m = curr_in.size  # 提供的电流个数（可能是基线圈数）
+
+    sym_factor = int(nfp) * (2 if stellsym else 1)
+
+    if m == k:
+        # 情况1：电流数量与曲线数一致
+        curr_list = _to_current_obj_list(curr_in)
+    elif sym_factor > 0 and (k % sym_factor == 0) and (m == k // sym_factor):
+        # 情况2：电流数量是“基线圈数”，而曲线是已经展开到全部线圈
+        # 这里按对称因子复制：每个基线圈的电流 → 复制 nfp*(stellsym?2:1) 次
+        curr_base = _to_current_obj_list(curr_in)
+        # 注意：若 curr_base 里有 Current/ScaledCurrent 对象，复制引用即可（和曲线实例一一对应）
+        curr_list = list(np.tile(curr_base, sym_factor))
+    else:
+        # 情况3：不匹配，明确报错，提示如何修正
+        raise ValueError(
+            f"currents 长度={m} 与曲线数 k={k} 不匹配；"
+            f"若 currents 是基线圈电流，请确保 k == m * nfp * (2 if stellsym else 1)；"
+            f"当前 nfp={nfp}, stellsym={stellsym} → 期望 k == {m} * {sym_factor} = {m*sym_factor}。"
+        )
+
+    print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}, sym_factor={sym_factor}")
+    # 仅尝试打印 get_value()；失败则打印对象
+    try:
+        print("currents (values):", [getattr(c, "get_value", lambda: c)() if hasattr(c, "get_value") else c for c in curr_list])
+    except Exception:
+        print("currents (objects):", curr_list)
+
+    # 若 curve_input 本身是“基线圈”，推荐把“基线圈+电流”交给 simsopt 去做对称展开：
+    #   coils = coils_via_symmetries(base_curves, curr_base, nfp, stellsym)
+    # 但此处你的 curve_input 已经是“全部线圈”时，我们直接把它们和 curr_list 传进去也是可以的。
+    # coils_via_symmetries 会再做一次展开；所以为了不重复展开，这里应传“基线圈+基电流”。
+    # 判断是否为“已展开”的输入：k == m * sym_factor（当我们刚刚复制过）
+    from simsopt.field import coils_via_symmetries
+    if m == k:
+        # 看起来 curve_input 和 currents 已经对应全部线圈；此时不应再做对称展开
+        # 但 coils_via_symmetries 的 API 需要“基线圈+基电流”。为了保持一致，这里采用简单策略：
+        # 当 m==k（已一一对应全部线圈）时，构造 nfp=1, stellsym=False 的“无展开”调用：
+        coils = coils_via_symmetries(base_curves, curr_list, 1, False)
+    else:
+        # 我们识别到 currents 是“基线圈电流”（刚刚复制出的 curr_list 是“全部线圈电流”）
+        # 为了避免双重展开，应该把“基线圈+基电流”传给 coils_via_symmetries，再由它展开
+        k_base = m
+        base_curves_for_expand = base_curves[:k_base] if (k == k_base * sym_factor) else base_curves
+        curr_base = _to_current_obj_list(curr_in)
+        coils = coils_via_symmetries(base_curves_for_expand, curr_base, nfp, stellsym)
+
     return coils
 
 
@@ -361,7 +411,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     import time
     import numpy as np
     from qsc import Qsc
-    from fieldline import fullax,from_simsopt,distance_cp,poincareplot
+    from fieldline import fullax,from_simsopt,distance_cp,poincareplot,fullax_safe
     from fieldarg import L_grad_B,CurveSurfaceDistance
     from simsopt.geo import (SurfaceRZFourier,plot,QfmResidual,CurveXYZFourier,boozer_surface_residual,SurfaceXYZTensorFourier, 
                             BoozerSurface,MajorRadius, CurveLength, NonQuasiSymmetricRatio, Iotas,Volume,Area)
@@ -447,17 +497,122 @@ if __name__ == "__main__":
     from simsopt.geo import plot
     from simsopt._core import load, save
 
-    ID = 958# ID可在scv文件中找到索引，以958为例
+    ID = 958# ID可在scv文件中找到索引，以958为例 2408903
     fID = ID // 1000 
-    [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
+    [surfaces, coils] = load(f'../simsopt_serials/{fID:04}/serial{ID:07}.json')
 
     currents = [c.current.get_value() for c in coils]
     order=4
-    print(surfaces[0].nfp)
     base_curves = [c.curve for c in coils]
     curve_input=[cur.x for cur in base_curves]
-    print(curve_input)
-    print(np.array(curve_input).shape)
+    print('nfp',surfaces[0].nfp)
+    # print(curve_input)
+    # print(np.array(curve_input).shape)
+
+
+
+
+
+    def nml_to_focus(nml_filename, focus_filename, nfp=2):
+        import re
+        """
+        从 VMEC .nml 文件中提取 RBC/ZBS 的 (n, m) 项，自动计算 bmn,写入 FOCUS 所需的 .boundary 文件。
+
+        参数:
+            nml_filename: str, 输入的 .nml 文件路径
+            focus_filename: str, 输出的 .boundary 文件路径
+            nfp (int): 磁场周期数
+        """
+        with open(nml_filename, 'r') as f:
+            text = f.read()
+
+        # 提取 NFP 值
+        nfp_match = re.search(r'NFP\s*=\s*(\d+)', text, re.IGNORECASE)
+        if not nfp_match:
+            raise ValueError("NFP 未在 NML 文件中找到。")
+        nfp = int(nfp_match.group(1))
+
+        # 正则提取所有 RBC 和 ZBS 项 (n, m)
+        rbc_pattern = re.findall(r'RBC\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
+        zbs_pattern = re.findall(r'ZBS\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
+
+        # 构建 {(n, m): value} 字典
+        rbc_dict = {(int(n), int(m)): float(val) for n, m, val in rbc_pattern}
+        zbs_dict = {(int(n), int(m)): float(val) for n, m, val in zbs_pattern}
+
+        # 所有键组合
+        all_keys = sorted(set(rbc_dict.keys()) | set(zbs_dict.keys()), key=lambda x: (x[1], x[0]))
+
+        bmn = len(all_keys)
+
+        # 写入 .boundary 文件
+        with open(focus_filename, 'w') as f:
+            f.write("# bmn   bNfp   nbf\n")
+            f.write(f"{bmn:3d} \t {nfp} \t 0\n")
+            f.write("# Plasma boundary\n")
+            f.write("# n m Rbc Rbs Zbc Zbs\n")
+            for n, m in all_keys:
+                rbc = rbc_dict.get((n, m), 0.0)
+                zbs = zbs_dict.get((n, m), 0.0)
+                f.write(f"{n:5d} {m:5d} {rbc: .15E}  0.000000000000000E+00  0.000000000000000E+00  {zbs: .15E}\n")
+
+        print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
+
+
+
+    surf=surfaces[-1]
+
+    surf=surf.to_RZFourier()
+    #surf.change_resolution(12,12)
+    surf.write_nml('temp.nml')
+
+
+
+
+    from coilpy.surface import FourSurf
+
+
+
+
+    nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
+
+
+
+    def coil_to_curves_currents(coils):
+        from simsopt.geo import CurveXYZFourier
+        curves = []
+        currents = []
+        for c in coils:
+            if isinstance(c.curve, CurveXYZFourier):
+                curves.append(c.curve)
+                currents.append(c.current)
+            else:
+                pass
+                #curves.append(c.curve.curve)
+        return curves,currents
+    [curves,currents] = coil_to_curves_currents(coils)
+
+    print(surfaces[0].nfp)
+    from simsopt.field import coils_to_focus
+    coils_to_focus('poincare.focus',curves, currents, nfp=surfaces[0].nfp,stellsym=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
 
