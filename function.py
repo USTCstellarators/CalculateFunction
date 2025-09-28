@@ -1,3 +1,15 @@
+import numpy as np
+from time import time
+from simsopt.geo import (QfmResidual,boozer_surface_residual,BoozerSurface 
+                        , CurveLength, CurveXYZFourier,NonQuasiSymmetricRatio,Volume,plot,SurfaceXYZTensorFourier, 
+                         Iotas,Area)
+from simsopt.field import BiotSavart,coils_via_symmetries, Current as SOCurrent
+import numbers
+from qsc import Qsc
+from fieldarg import L_grad_B,distance_cp
+from fieldline import fullax,from_simsopt,poincareplot
+from simsopt._core.util import Struct
+
 def generate_coils(curve_input, currents, nfp=1, stellsym=False):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
@@ -8,10 +20,6 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=False):
 
     返回：coils（可用于 Biot–Savart）
     """
-    import numpy as np
-    import numbers
-    from simsopt.geo import CurveXYZFourier
-    from simsopt.field import coils_via_symmetries, Current as SOCurrent
 
     def _as_curve_list(curve_input):
         # 统一出曲线列表，以及每根曲线的 order
@@ -106,7 +114,7 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=False):
     # 但此处你的 curve_input 已经是“全部线圈”时，我们直接把它们和 curr_list 传进去也是可以的。
     # coils_via_symmetries 会再做一次展开；所以为了不重复展开，这里应传“基线圈+基电流”。
     # 判断是否为“已展开”的输入：k == m * sym_factor（当我们刚刚复制过）
-    from simsopt.field import coils_via_symmetries
+   
     if m == k:
         # 看起来 curve_input 和 currents 已经对应全部线圈；此时不应再做对称展开
         # 但 coils_via_symmetries 的 API 需要“基线圈+基电流”。为了保持一致，这里采用简单策略：
@@ -124,14 +132,7 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=False):
 
 
 def coil_surface_to_para(surfaces,curve_input,currents):
-    import numpy as np
-    from time import time
-    from fieldarg import L_grad_B,CurveSurfaceDistance
-    from simsopt.geo import (QfmResidual,CurveXYZFourier,boozer_surface_residual,BoozerSurface 
-                            , CurveLength, NonQuasiSymmetricRatio, Iotas,Volume)
-    from simsopt.field import BiotSavart, coils_via_symmetries,Current
 	#生成线圈
-    
 
     nfp=surfaces[-1].nfp
     stellsym=surfaces[-1].stellsym
@@ -174,7 +175,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     aspect_ratio=surface.aspect_ratio()
     volume=volume.J()
 
-    lgb,_=L_grad_B(surface,coils)
+    lgb,_=L_grad_B(coils,surface)
     lgb_min=np.min(lgb)
     curvature= [[c.kappa()] for c in base_curves]
     max_curvature = np.max(curvature)
@@ -183,10 +184,9 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     length = [CurveLength(c).J() for c in base_curves]
     length=np.array(length)
     total_length=np.sum(length)
-    curvesurfacedistance=CurveSurfaceDistance(surface,coils)
+    curvesurfacedistance=distance_cp(surface,coils)
     
 
-    from simsopt._core.util import Struct
     plasma_para = Struct()
     plasma_variables = ['surface','qs_error' ,'boozerresidual','bnorm' ,'iota','aspect_ratio','volume','lgb','lgb_min','curvesurfacedistance']
     for v in plasma_variables:
@@ -217,16 +217,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     stellsym: bool
     alpha: float, alpha越大,步长越大
     '''
-    import time
-    import numpy as np
-    from qsc import Qsc
-    from fieldline import fullax,from_simsopt,distance_cp,poincareplot
-    from fieldarg import L_grad_B,CurveSurfaceDistance
-    from simsopt.geo import (SurfaceRZFourier,plot,QfmResidual,CurveXYZFourier,boozer_surface_residual,SurfaceXYZTensorFourier, 
-                            BoozerSurface,MajorRadius, CurveLength, NonQuasiSymmetricRatio, Iotas,Volume,Area)
-    from simsopt.field import BiotSavart, coils_via_symmetries,Current
 
-	
     if hasattr(curve_input, '__len__') and hasattr(currents, '__len__'):
         if len(curve_input) != len(currents):
             raise ValueError(f"curve_input 和 currents 长度不一致: len(curve_input) = {len(curve_input)}, len(currents) = {len(currents)}")
@@ -266,9 +257,9 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     volumetol=volume.J()#变化单位
     vol_change=volume.J()#每一步变化量
 
-# 循环
-# 终止条件：达到循环步数；达到目标体积。
-# 每一步增大的体积尝试动态变化
+    # 循环
+    # 终止条件：达到循环步数；达到目标体积。
+    # 每一步增大的体积尝试动态变化
 
     qs_error=[]
     attempt=1
@@ -338,7 +329,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     aspect_ratio=surface.aspect_ratio()
     volume=volume.J()
 
-    lgb,_=L_grad_B(surface,coils)
+    lgb,_=L_grad_B(coils,surface)
     lgb_min=np.min(lgb)    
     curvature= [[c.kappa()] for c in base_curves]
     max_curvature = np.max(curvature)
@@ -347,10 +338,9 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     length = [CurveLength(c).J() for c in base_curves]
     length=np.array(length)
     total_length=np.sum(length)
-    curvesurfacedistance,_,_=CurveSurfaceDistance(surface,coils)
+    curvesurfacedistance,_,_=distance_cp(surface,coils)
     
 
-    from simsopt._core.util import Struct
     plasma_para = Struct()
     plasma_variables = ['surface','qs_error' ,'boozerresidual','bnorm' ,'iota','aspect_ratio','volume','lgb','lgb_min','curvesurfacedistance']
     for v in plasma_variables:
@@ -379,16 +369,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     nfp: int
     stellsym: bool
     ''' 
-    import time
-    import numpy as np
-    from qsc import Qsc
-    from fieldline import fullax,from_simsopt,distance_cp,poincareplot,fullax_safe
-    from fieldarg import L_grad_B,CurveSurfaceDistance
-    from simsopt.geo import (SurfaceRZFourier,plot,QfmResidual,CurveXYZFourier,boozer_surface_residual,SurfaceXYZTensorFourier, 
-                            BoozerSurface,MajorRadius, CurveLength, NonQuasiSymmetricRatio, Iotas,Volume,Area)
-    from simsopt.field import BiotSavart, coils_via_symmetries,Current
-    # 如果 generate_coils 不在同一文件，请在此处导入：
-    # from your_module import generate_coils
+
 
     surfaceorder=4
 

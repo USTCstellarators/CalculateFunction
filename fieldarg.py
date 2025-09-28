@@ -26,7 +26,7 @@ def Bmod(s,cs,po=None):
     return modB
 
 
-def L_grad_B(s,cs,po=None):
+def L_grad_B(cs,s=None,po=None):
     '''
     input:
         s,simsopt面
@@ -36,6 +36,8 @@ def L_grad_B(s,cs,po=None):
     from simsopt.field import BiotSavart
     field = BiotSavart(cs)  # Multiple coils can be included in the list
     if po is None:
+        if s is None:
+            raise ValueError("Either surface s or points po must be provided.")
         po=s.gamma()
     (m,n,_)=po.shape
     po = np.ascontiguousarray(po.reshape(-1, 3), dtype=np.float64)
@@ -70,68 +72,41 @@ def L_grad_B(s,cs,po=None):
     min_point = po[min_idx]
     return L_grad_B,min_point
 
-
-
-
-def CurveSurfaceDistance(s, cs, visualize=False): 
+def distance_cp(s, cs): 
     ''' 
-    Compute and optionally visualize the minimum distance between a magnetic surface and coils.
+    Distance between magnetic surface and coils.
 
     Args:
         s: magnetic surface object, with method gamma()
-        cs: list of coil objects, each with a curve having method gamma()
-        visualize (bool): If True, plot the surface and coil points and highlight the shortest distance.
+        cs: list of simsopt coil objects, each with a curve having method gamma()
 
     Returns:
         dcp_min (float)         : Minimum distance.
         point_on_coil (ndarray) : Point on coil where distance is minimal.
         point_on_surface (ndarray): Point on magnetic surface where distance is minimal.
     '''
-    # 组装 coil 点
+    # 收集所有线圈的坐标点
     coil = []
     for c in cs:
         cur = c.curve
         coil.append(cur.gamma())  # shape: (ns, 3)
-    coil = np.array(coil)
-    coil = np.ascontiguousarray(coil.reshape(-1, 3), dtype=np.float64)  # (N1, 3)
+
+    coil = np.array(coil)  # shape: (nc, ns, 3)
+    coil = np.ascontiguousarray(coil.reshape(-1, 3), dtype=np.float64)  # flatten to (N1, 3)
 
     rs = s.gamma()  # shape: (N2, 3)
     rs = np.ascontiguousarray(rs.reshape(-1, 3), dtype=np.float64)
 
-    # 计算距离矩阵
+    # 计算每一对点之间的欧几里得距离
     dr = (coil[:, np.newaxis, :] - rs[np.newaxis, :, :])  # shape: (N1, N2, 3)
     dr_norm = np.linalg.norm(dr, axis=-1)  # shape: (N1, N2)
 
-    # 最小距离及索引
-    idx_coil, idx_surface = np.unravel_index(np.argmin(dr_norm), dr_norm.shape)
+    # 找到最小距离和对应的索引
+    min_idx = np.unravel_index(np.argmin(dr_norm), dr_norm.shape)
+    idx_coil, idx_surface = min_idx
+
     dcp_min = dr_norm[idx_coil, idx_surface]
     point_on_coil = coil[idx_coil]
     point_on_surface = rs[idx_surface]
 
-    # 可视化部分
-    if visualize:
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-
-        # 所有点
-        ax.scatter(coil[:, 0], coil[:, 1], coil[:, 2], color='blue', s=5, label='Coil points')
-        ax.scatter(rs[:, 0], rs[:, 1], rs[:, 2], color='green', s=5, label='Surface points')
-
-        # 最小距离点对
-        ax.scatter(*point_on_coil, color='red', s=50, label='Closest coil point')
-        ax.scatter(*point_on_surface, color='orange', s=50, label='Closest surface point')
-        ax.plot([point_on_coil[0], point_on_surface[0]],
-                [point_on_coil[1], point_on_surface[1]],
-                [point_on_coil[2], point_on_surface[2]], color='red', linewidth=2, linestyle='--', label='Shortest line')
-
-        ax.set_title(f'Min Distance = {dcp_min:.4f}')
-        ax.legend()
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        plt.tight_layout()
-        plt.show()
-
     return dcp_min, point_on_coil, point_on_surface
-
-
