@@ -154,10 +154,10 @@ def coil_surface_to_para(surfaces,curve_input,currents):
 
         boozer_surface = BoozerSurface(bs, s, volume, vol_target)
 
-        start_time = time.time()
+        start_time = time()
         res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100)
         qs_error+=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J() 
-        end_time = time.time()
+        end_time = time()
        
         residual_norm = np.linalg.norm(boozer_surface_residual(boozer_surface.surface, res["iota"], res["G"], bs, derivatives=0))
         print(f"vol_target={vol_target:.4f} -> iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
@@ -225,7 +225,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
         raise TypeError("curve_input 和 currents 应为可迭代对象（如列表、数组等）")
     
     #生成线圈
-    main_start_time = time.time()
+    main_start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
 
     print([c.current.get_value() for c in coils])
@@ -265,7 +265,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     attempt=1
     while attempt < max_attempts:
         try:
-            start_time = time.time()
+            start_time = time()
             s_save = surf.x.copy() #备份
             targetsave=vol_target
             vol_target+=vol_change
@@ -276,7 +276,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
 
             final_vol=volume.J()
             residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
-            end_time = time.time()
+            end_time = time()
             print(f" iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
             
             # 检查是否收敛
@@ -315,7 +315,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
     qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
     residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
-    main_end_time = time.time()
+    main_end_time = time()
     print(f"[最终结果] vol_target={vol_target:.4f} -> iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e}, 运行总时间：{main_end_time - main_start_time:.4f} 秒")
 
 
@@ -374,7 +374,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     surfaceorder=4
 
     # 生成线圈（仅改动这里）
-    start_time = time.time()
+    start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     print([c for c in currents])
 
@@ -409,7 +409,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     if residual_norm<1e-9:
         haveaxis = True
-    end_time = time.time()
+    end_time = time()
     
     print(f" iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
 

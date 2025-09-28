@@ -245,7 +245,7 @@ def xyzp2curvexyz(points, order=10, nfp=1):
     Returns:
         CurveXYZFourier 对象，包含拟合后的傅里叶系数
     """
-
+    curve=None
     return curve
 
 
@@ -563,6 +563,19 @@ def fieldline2rzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
 
 def fieldline2xyzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
     return xyz2surface(fieldline2gamma(fieldline, axisline, m, n, nfp),nfp,mpol,ntor)
+
+# def fieldline2rzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
+#     gamma=fieldline2gamma(fieldline, axisline, m, n, nfp)
+#     return rz2surface(R,Z,nfp,mpol,ntor)
+
+# def fieldline2xyzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
+#     gamma=fieldline2gamma(fieldline, axisline, m, n, nfp)
+#     phis = np.linspace(0, 1/2/nfp, gamma.shape[0], endpoint=False)
+#     thetas = np.linspace(0, 1, gamma.shape[1], endpoint=False)
+
+#     surf = SurfaceXYZFourier(nfp=nfp, mpol=mpol, ntor=ntor,quadpoints_phi=phis, quadpoints_theta=thetas)
+#     surf.least_squares_fit(gamma)
+#     return surf
 
 
 def from_simsopt(simsopt_coils):
