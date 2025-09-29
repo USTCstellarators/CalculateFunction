@@ -1,7 +1,6 @@
 import numpy as np
 import inspect
-from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZFourier
-from fieldarg import L_grad_B
+from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZTensorFourier,CurveRZFourier
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -250,7 +249,7 @@ def xyzp2curvexyz(points, order=10, nfp=1):
 
 
 
-def plot3D(fieldline):
+def plot3D(fieldline,show=True):
     """
     单纯绘制 fieldline 的 3D 点
     
@@ -271,7 +270,8 @@ def plot3D(fieldline):
     ax.set_title('Fieldline 3D Plot')
     ax.view_init(elev=30, azim=45)
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
 
 import numpy as np
 
@@ -338,9 +338,7 @@ def fieldline2rz(fieldline, axisline, m, n, nfp):
     - m: poloidal resolution (numquadpoints_theta)
     - n: toroidal resolution (numquadpoints_phi)
     - nfp: number of field periods
-    
-    Returns:
-    - xyz: (n, m, 3) array
+
     """
 
     # 提取 R 和 Z
@@ -371,7 +369,7 @@ def fieldline2rz(fieldline, axisline, m, n, nfp):
     Z1[n, :] = theta
     R_sorted = shell_sort(R1, n, m)[:n, :]
     Z_sorted = shell_sort(Z1, n, m)[:n, :]
-    return rz_resort(R_sorted,Z_sorted,nfp)
+    return R_sorted,Z_sorted#rz_resort(R_sorted,Z_sorted,nfp)
 
 def fieldline2gamma(fieldline, axisline, m, n, nfp):
     """
@@ -443,8 +441,10 @@ def rz2surface(R, Z, nfp, mpol, ntor):
     - stellsym: 是否考虑星形对称性
     """
     n_zeta, n_theta = R.shape
+    # theta = np.linspace(0, 2*np.pi, n_theta, endpoint=False)
+    # zeta  = np.linspace(0, np.pi/nfp, n_zeta, endpoint=False)
     theta = np.linspace(0, 2*np.pi, n_theta, endpoint=False)
-    zeta  = np.linspace(0, np.pi/nfp, n_zeta, endpoint=False)
+    zeta  = np.linspace(0, 2*np.pi, n_zeta, endpoint=False)
     Theta, Zeta = np.meshgrid(theta, zeta, indexing='ij')
     
     R_flat = R.T.flatten()  # 转置后 flatten，使第一维是 θ
@@ -481,7 +481,6 @@ def rz2surface(R, Z, nfp, mpol, ntor):
     surf = SurfaceRZFourier(nfp=nfp, mpol=mpol, ntor=ntor, stellsym=True)
     surf.set_dofs(np.array(dofs))
     print(f"拟合完成: 总 dofs = {len(dofs)}")
-    print('dofs =', dofs)
     return surf
 
 
@@ -550,7 +549,7 @@ def xyz2surface(XYZ, nfp,  mpol, ntor):
     dofs = np.concatenate([dofs_X, dofs_Y, dofs_Z])
 
     # 构造 surface
-    surf = SurfaceXYZFourier(nfp=nfp, mpol=mpol, ntor=ntor)
+    surf = SurfaceXYZTensorFourier(nfp=nfp, mpol=mpol, ntor=ntor)
     surf.set_dofs(dofs)
 
     print(f"拟合完成: 总 dofs = {len(dofs)}")
@@ -563,6 +562,43 @@ def fieldline2rzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
 
 def fieldline2xyzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
     return xyz2surface(fieldline2gamma(fieldline, axisline, m, n, nfp),nfp,mpol,ntor)
+
+
+def fieldline2rzsurfacefit(fieldline, axisline, m, n, nfp,mpol,ntor):
+    stellsym=True
+    gamma=fieldline2gamma(fieldline, axisline, m, n, nfp)
+
+    phis = np.linspace(0, 1/nfp/2, int(n/nfp/2), endpoint=False)
+    thetas = np.linspace(0, 1, m, endpoint=False)
+    s = SurfaceRZFourier(
+    mpol=mpol, ntor=ntor, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
+    gamma=np.array(gamma)
+    s.least_squares_fit(gamma)
+    phis   = np.linspace(0, 1/nfp, 2*ntor+1, endpoint=False)
+    thetas = np.linspace(0, 1, 2*mpol+1, endpoint=False)
+    srz = SurfaceRZFourier(
+    mpol=mpol, ntor=ntor, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
+    srz.set_dofs(s.get_dofs())
+
+    return srz
+
+def fieldline2xyzsurfacefit(fieldline, axisline, m, n, nfp,mpol,ntor):
+    stellsym=True
+    gamma=fieldline2gamma(fieldline, axisline, m, n, nfp)
+
+    phis = np.linspace(0, 1/nfp/2, int(n/nfp/2), endpoint=False)
+    thetas = np.linspace(0, 1, m, endpoint=False)
+    s = SurfaceXYZTensorFourier(
+    mpol=mpol, ntor=ntor, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
+    gamma=np.array(gamma)
+    s.least_squares_fit(gamma)
+    phis   = np.linspace(0, 1/nfp, 2*ntor+1, endpoint=False)
+    thetas = np.linspace(0, 1, 2*mpol+1, endpoint=False)
+    sxyz = SurfaceXYZTensorFourier(
+    mpol=mpol, ntor=ntor, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
+    sxyz.set_dofs(s.get_dofs())
+
+    return sxyz
 
 # def fieldline2rzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
 #     gamma=fieldline2gamma(fieldline, axisline, m, n, nfp)
@@ -597,6 +633,86 @@ def from_simsopt(simsopt_coils):
         groups.append(1)  # default to group 1, or customize
 
     return CoilpyCoil(xx=xx, yy=yy, zz=zz, II=II, names=names, groups=groups)
+
+
+def read_focus_coils(filename,nfp=None, stellsym=False):
+    """
+    Reads coils from a FOCUS file (generalized).
+    """
+    from simsopt.field import coils_via_symmetries
+    from simsopt.geo import CurveXYZFourier
+    from simsopt.field import Current
+
+    if stellsym is None:
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+        # 第一个 coil 的数据行: 第 5 行 "coil_type  symm  coil_name"
+        first_coil_parts = lines[4].split()
+        symm_first = int(first_coil_parts[1])
+        stellsym = (symm_first == 2)  # 对应 FOCUS 的 stellsym=2
+    if nfp is None:
+        if symm_first==1:
+            raise ValueError("nfp must be provided for symm==1.")
+        else:
+            nfp=1
+
+    # 读取 coil 数量
+    ncoils = int(np.loadtxt(filename, skiprows=1, max_rows=1, dtype=int))
+    # 读取展开阶数
+    order = int(np.loadtxt(filename, skiprows=8, max_rows=1, dtype=int))
+
+    # 准备存储
+    coilcurrents = np.zeros(ncoils)
+    xc, xs, yc, ys, zc, zs = [np.zeros((ncoils, order + 1)) for _ in range(6)]
+
+    # 每个 coil 占多少行
+    lines_per_coil = 14
+
+    # 循环读取每个 coil 的数据块
+    for i in range(ncoils):
+        offset = 6 + i * lines_per_coil
+        coilcurrents[i] = np.loadtxt(filename, skiprows=offset, max_rows=1, usecols=1)
+
+        coeff_offset = offset + 4
+        xc[i, :] = np.loadtxt(filename, skiprows=coeff_offset,     max_rows=1, usecols=range(order + 1))
+        xs[i, :] = np.loadtxt(filename, skiprows=coeff_offset + 1, max_rows=1, usecols=range(order + 1))
+        yc[i, :] = np.loadtxt(filename, skiprows=coeff_offset + 2, max_rows=1, usecols=range(order + 1))
+        ys[i, :] = np.loadtxt(filename, skiprows=coeff_offset + 3, max_rows=1, usecols=range(order + 1))
+        zc[i, :] = np.loadtxt(filename, skiprows=coeff_offset + 4, max_rows=1, usecols=range(order + 1))
+        zs[i, :] = np.loadtxt(filename, skiprows=coeff_offset + 5, max_rows=1, usecols=range(order + 1))
+
+    # 组合成 simsopt 格式 (sin_x, cos_x, sin_y, cos_y, sin_z, cos_z)
+    coil_data = np.zeros((order + 1, ncoils * 6))
+    for i in range(ncoils):
+        coil_data[:, i * 6 + 0] = xs[i, :]
+        coil_data[:, i * 6 + 1] = xc[i, :]
+        coil_data[:, i * 6 + 2] = ys[i, :]
+        coil_data[:, i * 6 + 3] = yc[i, :]
+        coil_data[:, i * 6 + 4] = zs[i, :]
+        coil_data[:, i * 6 + 5] = zc[i, :]
+
+    # 构造 simsopt 对象
+    base_currents = [Current(coilcurrents[i]) for i in range(ncoils)]
+    ppp = 20
+    curves = [CurveXYZFourier(order * ppp, order) for _ in range(ncoils)]
+
+    for ic in range(ncoils):
+        dofs = curves[ic].dofs_matrix
+        dofs[0][0] = coil_data[0, 6*ic + 1]
+        dofs[1][0] = coil_data[0, 6*ic + 3]
+        dofs[2][0] = coil_data[0, 6*ic + 5]
+
+        for io in range(min(order, coil_data.shape[0]-1)):
+            dofs[0][2*io+1] = coil_data[io+1, 6*ic + 0]
+            dofs[0][2*io+2] = coil_data[io+1, 6*ic + 1]
+            dofs[1][2*io+1] = coil_data[io+1, 6*ic + 2]
+            dofs[1][2*io+2] = coil_data[io+1, 6*ic + 3]
+            dofs[2][2*io+1] = coil_data[io+1, 6*ic + 4]
+            dofs[2][2*io+2] = coil_data[io+1, 6*ic + 5]
+
+        curves[ic].local_x = np.concatenate(dofs)
+    coils = coils_via_symmetries(curves, base_currents, nfp, stellsym)
+    return coils
 
 
 if __name__ == "__main__":

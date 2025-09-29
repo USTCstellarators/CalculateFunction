@@ -137,7 +137,8 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     nfp=surfaces[-1].nfp
     stellsym=surfaces[-1].stellsym
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
-	#biotsavart算磁场,累加电流
+    base_curves=[c.curve for c in coils]
+    #biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
     current_sum = sum(i for i in currents)   
     G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
