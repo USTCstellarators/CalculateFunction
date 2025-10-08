@@ -104,12 +104,15 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=False):
 
     print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}")
 
+    print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}")
+
 
     # 若 curve_input 本身是“基线圈”，推荐把“基线圈+电流”交给 simsopt 去做对称展开：
     #   coils = coils_via_symmetries(base_curves, curr_base, nfp, stellsym)
     # 但此处你的 curve_input 已经是“全部线圈”时，我们直接把它们和 curr_list 传进去也是可以的。
     # coils_via_symmetries 会再做一次展开；所以为了不重复展开，这里应传“基线圈+基电流”。
     # 判断是否为“已展开”的输入：k == m * sym_factor（当我们刚刚复制过）
+   
    
     if m == k:
         # 看起来 curve_input 和 currents 已经对应全部线圈；此时不应再做对称展开
@@ -135,6 +138,9 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     base_curves=[c.curve for c in coils]
     #biotsavart算磁场,累加电流
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
+    base_curves=[c.curve for c in coils]
+    #biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
     current_sum = sum(i for i in currents)   
     G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
@@ -152,8 +158,10 @@ def coil_surface_to_para(surfaces,curve_input,currents):
         boozer_surface = BoozerSurface(bs, s, volume, vol_target)
 
         start_time = time()
+        start_time = time()
         res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100)
         qs_error+=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J() 
+        end_time = time()
         end_time = time()
        
         residual_norm = np.linalg.norm(boozer_surface_residual(boozer_surface.surface, res["iota"], res["G"], bs, derivatives=0))
@@ -173,6 +181,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     volume=volume.J()
 
     lgb,_=L_grad_B(coils,surface)
+    lgb,_=L_grad_B(coils,surface)
     lgb_min=np.min(lgb)
     curvature= [[c.kappa()] for c in base_curves]
     max_curvature = np.max(curvature)
@@ -181,6 +190,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     length = [CurveLength(c).J() for c in base_curves]
     length=np.array(length)
     total_length=np.sum(length)
+    curvesurfacedistance=distance_cp(surface,coils)
     curvesurfacedistance=distance_cp(surface,coils)
     
 
@@ -209,6 +219,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     '''
     输入k个傅里叶模数为n的线圈, 输出仿星器参数
     curve_input: (k, N) 或者CurveXYZFourier类    
+    curve_input: (k, N) 或者CurveXYZFourier类    
     currents: (k,) 
     nfp: int
     stellsym: bool
@@ -222,6 +233,9 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
         raise TypeError("curve_input 和 currents 应为可迭代对象（如列表、数组等）")
     
     #生成线圈
+    main_start_time = time()
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
+
     main_start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
 
@@ -257,11 +271,15 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     # 循环
     # 终止条件：达到循环步数；达到目标体积。
     # 每一步增大的体积尝试动态变化
+    # 循环
+    # 终止条件：达到循环步数；达到目标体积。
+    # 每一步增大的体积尝试动态变化
 
     qs_error=[]
     attempt=1
     while attempt < max_attempts:
         try:
+            start_time = time()
             start_time = time()
             s_save = surf.x.copy() #备份
             targetsave=vol_target
@@ -273,6 +291,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
 
             final_vol=volume.J()
             residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
+            end_time = time()
             end_time = time()
             print(f" iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
             
@@ -295,6 +314,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
             qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
 
             volumetol = alpha * vol_change
+            volumetol = alpha * vol_change
             print('volumetol=',volumetol)
             print('vol_change=',vol_change)
             vol_change+=volumetol
@@ -313,6 +333,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
     residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     main_end_time = time()
+    main_end_time = time()
     print(f"[最终结果] vol_target={vol_target:.4f} -> iota={res['iota']:.3f}, volume={volume.J():.3f}, residual={residual_norm:.3e}, 运行总时间：{main_end_time - main_start_time:.4f} 秒")
 
 
@@ -327,6 +348,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     volume=volume.J()
 
     lgb,_=L_grad_B(coils,surface)
+    lgb,_=L_grad_B(coils,surface)
     lgb_min=np.min(lgb)    
     curvature= [[c.kappa()] for c in base_curves]
     max_curvature = np.max(curvature)
@@ -335,6 +357,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     length = [CurveLength(c).J() for c in base_curves]
     length=np.array(length)
     total_length=np.sum(length)
+    curvesurfacedistance,_,_=distance_cp(surface,coils)
     curvesurfacedistance,_,_=distance_cp(surface,coils)
     
 
@@ -358,7 +381,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None, plot=False):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -368,9 +391,11 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     ''' 
 
 
+
     surfaceorder=4
 
     # 生成线圈（仅改动这里）
+    start_time = time()
     start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     print([c for c in currents])
@@ -383,7 +408,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
 
     #用磁场找到磁轴
     cpcoils=from_simsopt(coils)
-    ma=fullax(cpcoils,rz0=rz0)
+    ma=fullax(cpcoils,rz0=rz0,**kwargs)
 
     mpol = surfaceorder  
     ntor = surfaceorder  
@@ -407,6 +432,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     if residual_norm<1e-9:
         haveaxis = True
     end_time = time()
+    end_time = time()
     
     print(f" iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e},运行时间：{end_time - start_time:.4f} 秒")
 
@@ -423,19 +449,25 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
 
 if __name__ == "__main__":
     #测试coil_to_para
+    #测试coil_to_para
     import numpy as np
     from simsopt.geo import plot
     from simsopt._core import load, save
 
     ID = 958# ID可在scv文件中找到索引，以958为例
+    ID = 958# ID可在scv文件中找到索引，以958为例
     fID = ID // 1000 
+    [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
     [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
 
     currents = [c.current.get_value() for c in coils]
     order=4
     print(surfaces[0].nfp)
+    print(surfaces[0].nfp)
     base_curves = [c.curve for c in coils]
     curve_input=[cur.x for cur in base_curves]
+    print(curve_input)
+    print(np.array(curve_input).shape)
     print(curve_input)
     print(np.array(curve_input).shape)
 
@@ -482,12 +514,28 @@ if __name__ == "__main__":
     # #surf.change_resolution(12,12)
     # surf.write_nml('temp.nml')
 
+
     # from coilpy.surface import FourSurf
 
     # nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
 
     # print('nfp',surfaces[0].nfp)
+
+    # nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
+
+    # print('nfp',surfaces[0].nfp)
     # from simsopt.field import coils_to_focus
+    # coils_to_focus('poincare.focus', curves=[c.curve for c in coils], currents=[c.current for c in coils], nfp=surfaces[0].nfp, stellsym=True)
+
+
+    # # 测试
+
+    # haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
+
+    # print(haveaxis)
+    # print(iota)
+    # print(qs_error)
+
     # coils_to_focus('poincare.focus', curves=[c.curve for c in coils], currents=[c.current for c in coils], nfp=surfaces[0].nfp, stellsym=True)
 
 

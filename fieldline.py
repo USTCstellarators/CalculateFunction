@@ -8,7 +8,7 @@ from simsopt.geo.curverzfourier import CurveRZFourier
 from numpy import arctan
 from mpl_toolkits.mplot3d import Axes3D
 from simsopt.geo import CurveXYZFourier
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit,solve_ivp
 import os
 from simsopt.field import (InterpolatedField, coils_via_symmetries, SurfaceClassifier,
                            compute_fieldlines, LevelsetStoppingCriterion, plot_poincare_data)
