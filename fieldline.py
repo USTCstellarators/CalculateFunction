@@ -2,7 +2,7 @@ import numpy as np
 from math import pi
 import matplotlib.pyplot as plt
 from coilpy import Coil as cl
-from coilpy.misc import poincare_plot,print_progress,tracing
+from coilpy.misc import poincare_plot,print_progress
 from scipy.optimize import minimize
 from simsopt.geo.curverzfourier import CurveRZFourier
 from numpy import arctan
@@ -21,50 +21,209 @@ def findrz0(coils):
     print('rz0=',np.sqrt(x**2+y**2))
     return np.sqrt(x**2+y**2)
 
-def nml_to_focus(nml_filename, focus_filename, nfp=2):
-    import re
+def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1, **kwargs):
+    """Trace magnetic field line in toroidal geometry
+
+    Args:
+        bfield (callable): A callable function.
+                          The calling signature is `B = bfield(xyz)`, where `xyz`
+                          is the position in cartesian coordinates and `B` is the
+                          magnetic field at this point (in cartesian coordinates).
+        r0 (list): Initial radial coordinates.
+        z0 (list): Initial vertical coordinates.
+        phi0 (float, optional): The toroidal angle where the poincare plot data saved.
+                                Defaults to 0.0.
+        niter (int, optional): Number of toroidal periods in tracing. Defaults to 100.
+        nfp (int, optional): Number of field periodicity. Defaults to 1.
+        nstep (int, optional): Number of intermediate step for one period. Defaults to 1.
+
+    Returns:
+        array_like: The stored poincare date, shape is (len(r0), niter+1, 2).
     """
-    从 VMEC .nml 文件中提取 RBC/ZBS 的 (n, m) 项，自动计算 bmn,写入 FOCUS 所需的 .boundary 文件。
+    from scipy.integrate import solve_ivp
 
-    参数:
-        nml_filename: str, 输入的 .nml 文件路径
-        focus_filename: str, 输出的 .boundary 文件路径
-        nfp (int): 场周期数
+    # define the integrand in cylindrical coordinates
+    def fieldline(phi, rz):
+        rpz = np.array([rz[0], phi, rz[1]])
+        cosphi = np.cos(phi)
+        sinphi = np.sin(phi)
+        xyz = np.array([rpz[0] * cosphi, rpz[0] * sinphi, rpz[2]])
+        mag_xyz = np.ravel(bfield(xyz))
+        mag_rpz = np.array(
+            [
+                mag_xyz[0] * cosphi + mag_xyz[1] * sinphi,
+                (-mag_xyz[0] * sinphi + mag_xyz[1] * cosphi) / rpz[0],
+                mag_xyz[2],
+            ]
+        )
+        return [mag_rpz[0] / mag_rpz[1], mag_rpz[2] / mag_rpz[1]]
+
+    # some settings
+    print("Begin field-line tracing: ")
+    if kwargs.get("method") is None:
+        kwargs.update({"method": "LSODA"})  # using LSODE
+    if kwargs.get("rtol") is None:
+        kwargs.update({"rtol": 1e-6})  # minimum tolerance
+    # begin tracing
+    dphi = 2 * np.pi / nfp / nstep
+    phi = phi0 + dphi * nstep * np.arange(niter)
+    nlines = len(r0)
+    lines = []
+    for i in range(nlines):  # loop over each field-line
+        points = [[r0[i], z0[i]]]
+        for j in range(niter):  # loop over each toroidal iteration
+            print_progress(i * niter + j + 1, nlines * niter)
+            rz = points[j]
+            phi_start = phi[j]
+            for k in range(nstep):  # loop inside one iteration
+                sol = solve_ivp(fieldline, (phi_start, phi_start + dphi), rz, **kwargs)
+                rz = sol.y[:, -1]
+                phi_start += dphi
+            points.append(rz)
+        lines.append(np.array(points))
+    return np.array(lines)
+
+
+def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1, **kwargs):
+    """Trace magnetic field line in toroidal geometry
+
+    Args:
+        bfield (callable): A callable function.
+                          The calling signature is `B = bfield(xyz)`, where `xyz`
+                          is the position in cartesian coordinates and `B` is the
+                          magnetic field at this point (in cartesian coordinates).
+        r0 (list): Initial radial coordinates.
+        z0 (list): Initial vertical coordinates.
+        phi0 (float, optional): The toroidal angle where the poincare plot data saved.
+                                Defaults to 0.0.
+        niter (int, optional): Number of toroidal periods in tracing. Defaults to 100.
+        nfp (int, optional): Number of field periodicity. Defaults to 1.
+        nstep (int, optional): Number of intermediate step for one period. Defaults to 1.
+
+    Returns:
+        array_like: The stored poincare date, shape is (len(r0), niter+1, 2).
     """
-    with open(nml_filename, 'r') as f:
-        text = f.read()
+    from scipy.integrate import solve_ivp
 
-    # 提取 NFP 值
-    nfp_match = re.search(r'NFP\s*=\s*(\d+)', text, re.IGNORECASE)
-    if not nfp_match:
-        raise ValueError("NFP 未在 NML 文件中找到。")
-    nfp = int(nfp_match.group(1))
+    # define the integrand in cylindrical coordinates
+    def fieldline(phi, rz):
+        rpz = np.array([rz[0], phi, rz[1]])
+        cosphi = np.cos(phi)
+        sinphi = np.sin(phi)
+        xyz = np.array([rpz[0] * cosphi, rpz[0] * sinphi, rpz[2]])
+        mag_xyz = np.ravel(bfield(xyz))
+        mag_rpz = np.array(
+            [
+                mag_xyz[0] * cosphi + mag_xyz[1] * sinphi,
+                (-mag_xyz[0] * sinphi + mag_xyz[1] * cosphi) / rpz[0],
+                mag_xyz[2],
+            ]
+        )
+        return [mag_rpz[0] / mag_rpz[1], mag_rpz[2] / mag_rpz[1]]
 
-    # 正则提取所有 RBC 和 ZBS 项 (n, m)
-    rbc_pattern = re.findall(r'RBC\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
-    zbs_pattern = re.findall(r'ZBS\(\s*(-?\d+)\s*,\s*(\d+)\s*\)\s*=\s*([Ee0-9\+\-\.]+)', text)
+    # some settings
+    print("Begin field-line tracing: ")
+    if kwargs.get("method") is None:
+        kwargs.update({"method": "LSODA"})  # using LSODE
+    if kwargs.get("rtol") is None:
+        kwargs.update({"rtol": 1e-6})  # minimum tolerance
+    # begin tracing
+    dphi = 2 * np.pi / nfp / nstep
+    phi = phi0 + dphi * nstep * np.arange(niter)
+    nlines = len(r0)
+    lines = []
+    for i in range(nlines):  # loop over each field-line
+        points = [[r0[i], z0[i]]]
+        for j in range(niter):  # loop over each toroidal iteration
+            print_progress(i * niter + j + 1, nlines * niter)
+            rz = points[j]
+            phi_start = phi[j]
+            for k in range(nstep):  # loop inside one iteration
+                sol = solve_ivp(fieldline, (phi_start, phi_start + dphi), rz, **kwargs)
+                rz = sol.y[:, -1]
+                phi_start += dphi
+            points.append(rz)
+        lines.append(np.array(points))
+    return np.array(lines)
 
-    # 构建 {(n, m): value} 字典
-    rbc_dict = {(int(n), int(m)): float(val) for n, m, val in rbc_pattern}
-    zbs_dict = {(int(n), int(m)): float(val) for n, m, val in zbs_pattern}
+def tracingplot(
+    bfield, r0, z0,
+    phi0=0.0, niter=100, nfp=1, nstep=1,
+    # 新增简单参数
+    plot=False,           # 是否绘图
+    show=True,            # 是否展示窗口
+    save=False,           # 是否保存
+    save_dir=".",         # 保存目录
+    save_prefix="tracing",# 前缀
+    save_ext="png",       # 扩展名
+    save_idx=1,           # 序号，由调用者传入
+    dpi=150,              # 保存分辨率
+    **kwargs
+):
+    """
+    Trace magnetic field line in toroidal geometry.
+    返回：np.array(lines) 形状 (len(r0), niter+1, 2)。
+    """
+    def fieldline(phi, rz):
+        rpz = np.array([rz[0], phi, rz[1]])
+        cosphi, sinphi = np.cos(phi), np.sin(phi)
+        xyz = np.array([rpz[0]*cosphi, rpz[0]*sinphi, rpz[2]])
+        mag_xyz = np.ravel(bfield(xyz))
+        mag_rpz = np.array([
+            mag_xyz[0]*cosphi + mag_xyz[1]*sinphi,
+            (-mag_xyz[0]*sinphi + mag_xyz[1]*cosphi)/rpz[0],
+            mag_xyz[2]
+        ])
+        return [mag_rpz[0]/mag_rpz[1], mag_rpz[2]/mag_rpz[1]]
 
-    # 所有键组合
-    all_keys = sorted(set(rbc_dict.keys()) | set(zbs_dict.keys()), key=lambda x: (x[1], x[0]))
+    if kwargs.get("method") is None:
+        kwargs.update({"method": "LSODA"})
+    if kwargs.get("rtol") is None:
+        kwargs.update({"rtol": 1e-6})
 
-    bmn = len(all_keys)
+    dphi = 2*np.pi/nfp/nstep
+    phi = phi0 + dphi*nstep*np.arange(niter)
+    nlines = len(r0)
+    lines = []
+    for i in range(nlines):
+        points = [[r0[i], z0[i]]]
+        for j in range(niter):
+            rz = points[j]
+            phi_start = phi[j]
+            for _ in range(nstep):
+                sol = solve_ivp(fieldline, (phi_start, phi_start+dphi), rz, **kwargs)
+                rz = sol.y[:, -1]
+                phi_start += dphi
+            points.append(rz)
+        lines.append(np.array(points))
 
-    # 写入 .boundary 文件
-    with open(focus_filename, 'w') as f:
-        f.write("# bmn   bNfp   nbf\n")
-        f.write(f"{bmn:3d} \t {nfp} \t 0\n")
-        f.write("# Plasma boundary\n")
-        f.write("# n m Rbc Rbs Zbc Zbs\n")
-        for n, m in all_keys:
-            rbc = rbc_dict.get((n, m), 0.0)
-            zbs = zbs_dict.get((n, m), 0.0)
-            f.write(f"{n:5d} {m:5d} {rbc: .15E}  0.000000000000000E+00  0.000000000000000E+00  {zbs: .15E}\n")
+    lines = np.array(lines)
 
-    print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
+    # 绘图/保存
+    if plot:
+        fig, ax = plt.subplots()
+        for i in range(len(lines)):
+            ax.plot(lines[i][:,0], lines[i][:,1], label=f"line {i}")
+        ax.set_xlabel("r")
+        ax.set_ylabel("z")
+        ax.set_title("Tracing result")
+        ax.legend()
+        ax.grid(True)
+
+        if save:
+            fname = f"{save_prefix}_{save_idx:03d}.{save_ext}"
+            import os
+            outpath = os.path.join(save_dir, fname)
+            fig.savefig(outpath, dpi=dpi, bbox_inches="tight")
+            print(f"Saved figure: {outpath}")
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+    return lines
+
 
 def tracingFULL(bfield, r0, z0, phi0=0.0, order=10,niter=100, nfp=1, nstep=1,FullLine=True, **kwargs):
     """Trace magnetic field line in toroidal geometry
@@ -157,9 +316,77 @@ def loadcurve(filename='rz.npz'):
     return curve
 
 
+def fullaxplot(coils, rz0=None, phi0=0, bounds=None,
+           order=10, niter=1, nstep=10,
+           save=False, save_dir=".", prefix="fullax", **kwargs):
+    """
+    优化磁轴，并可在优化过程中自动保存每次 tracing 图像。
+    """
+    if rz0 is None:
+        rz0 = [findrz0(coils), 0]
+
+    def field(pos):
+        b = 0
+        for i in range(len(coils)):
+            b += coils.data[i].bfield_HH(pos)
+        return b
+
+    # 调用计数器
+    call_counter = {"n": 0}
+
+    def fun(rz):
+        if not np.all(np.isfinite(rz)) or rz[0] <= 0:
+            print(f"rz 非法: {rz}")
+            return 1e6
+
+        try:
+            lines = tracing(field, [rz[0]], [rz[1]],
+                            niter=niter, phi0=phi0, nstep=nstep, **kwargs)
+            if not np.all(np.isfinite(lines)):
+                print(f"tracing() 返回 nan, rz = {rz}")
+                return 1e6
+
+            line = lines[0]
+            r_vals = [pt[0] for pt in line]
+            z_vals = [pt[1] for pt in line]
+
+            # 自动保存
+            if save:
+                call_counter["n"] += 1
+                idx = call_counter["n"]
+                os.makedirs(save_dir, exist_ok=True)
+                fname = os.path.join(save_dir, f"{prefix}_{idx:03d}.png")
+
+                plt.figure()
+                plt.plot(r_vals, z_vals, label=f"rz = {rz}")
+                plt.xlabel("r")
+                plt.ylabel("z")
+                plt.title(f"Tracing Line for rz = {rz}")
+                plt.legend()
+                plt.grid(True)
+                plt.savefig(fname, dpi=150, bbox_inches="tight")
+                plt.close()
+                print(f"Saved: {fname}")
+
+            # 目标函数值
+            r = (line[1][0] - rz[0])**2 + (line[1][1] - rz[1])**2
+            return r
+
+        except Exception as e:
+            print(f"tracing 失败, rz = {rz}, 错误: {e}")
+            return 1e6
+
+    res = minimize(fun, rz0, bounds=bounds)
+    print(res)
+
+    axlist = tracingFULL(field, [res.x[0]], [res.x[1]],
+                         niter=1, nstep=360, phi0=phi0, FullLine=1, **kwargs)
+    ma = rzp2curverz(axlist)
+    return ma
 
 
-def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=2,**kwargs):
+
+def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,**kwargs):
     #if bounds is None:
         #bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
     if rz0==None:
@@ -177,23 +404,23 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=2,**kwargs):
             return 1e6  # 惩罚项，优化器会避开这组参数
 
         try:
-            lines = tracing(field, [rz[0]], [rz[1]], niter=niter, phi0=phi0, **kwargs)
+            lines = tracing(field, [rz[0]], [rz[1]], niter=niter, phi0=phi0, nstep=nstep,**kwargs)
             if not np.all(np.isfinite(lines)):
                 print(f"tracing() 返回包含 nan 的轨迹, rz = {rz}")
                 return 1e6
             line = lines[0]
-            # # ⬇️ 可视化 tracing 的轨迹
-            # r_vals = [pt[0] for pt in line]
-            # z_vals = [pt[1] for pt in line]
+            # ⬇️ 可视化 tracing 的轨迹
+            r_vals = [pt[0] for pt in line]
+            z_vals = [pt[1] for pt in line]
             
-            # plt.figure()
-            # plt.plot(r_vals, z_vals, label=f"rz = {rz}")
-            # plt.xlabel('r')
-            # plt.ylabel('z')
-            # plt.title(f'Tracing Line for rz = {rz}')
-            # plt.legend()
-            # plt.grid(True)
-            # plt.show()  # 阻塞直到窗口关闭
+            plt.figure()
+            plt.plot(r_vals, z_vals, label=f"rz = {rz}")
+            plt.xlabel('r')
+            plt.ylabel('z')
+            plt.title(f'Tracing Line for rz = {rz}')
+            plt.legend()
+            plt.grid(True)
+            plt.show()  # 阻塞直到窗口关闭
             
             r = (line[1][0] - rz[0])**2 + (line[1][1] - rz[1])**2
             return r

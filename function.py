@@ -7,7 +7,7 @@ from simsopt.field import BiotSavart,coils_via_symmetries, Current as SOCurrent
 import numbers
 from qsc import Qsc
 from fieldarg import L_grad_B,distance_cp
-from fieldline import fullax,from_simsopt,poincareplot
+from fieldline import fullax,fullaxplot,from_simsopt,poincareplot
 from simsopt._core.util import Struct
 
 def generate_coils(curve_input, currents, nfp=1, stellsym=False):
@@ -102,12 +102,8 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=False):
             f"当前 nfp={nfp}, stellsym={stellsym} → 期望 k == {m} * {sym_factor} = {m*sym_factor}。"
         )
 
-    print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}, sym_factor={sym_factor}")
-    # 仅尝试打印 get_value()；失败则打印对象
-    try:
-        print("currents (values):", [getattr(c, "get_value", lambda: c)() if hasattr(c, "get_value") else c for c in curr_list])
-    except Exception:
-        print("currents (objects):", curr_list)
+    print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}")
+
 
     # 若 curve_input 本身是“基线圈”，推荐把“基线圈+电流”交给 simsopt 去做对称展开：
     #   coils = coils_via_symmetries(base_curves, curr_base, nfp, stellsym)
@@ -197,14 +193,14 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     coil_variables = ["coils","curvature","torsion","max_curvature","max_torsion","length","total_length"]
     for v in coil_variables:
         coil_para.__setattr__(v, eval(v))
-    print('-'*20)
-    print("Plasma Parameters:")
-    for key in plasma_para.__dict__:
-        print(f"{key}: {getattr(plasma_para, key)}")
-    print('-'*20)
-    print("\nCoil Parameters:")
-    for key in coil_para.__dict__:
-        print(f"{key}: {getattr(coil_para, key)}")
+    # print('-'*20)
+    # print("Plasma Parameters:")
+    # for key in plasma_para.__dict__:
+    #     print(f"{key}: {getattr(plasma_para, key)}")
+    # print('-'*20)
+    # print("\nCoil Parameters:")
+    # for key in coil_para.__dict__:
+    #     print(f"{key}: {getattr(coil_para, key)}")
     return plasma_para,coil_para
 
 
@@ -238,7 +234,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     if ma is None:
         #用磁场找到磁轴,设定初始面
         cpcoils=from_simsopt(coils)
-        ma=fullax(cpcoils,rz0=rz0)
+        ma=fullaxplot(cpcoils,rz0=rz0,niter=1, nstep=10,save=True, save_dir="./opt_steps", prefix="trial")
 
     mpol = surfaceorder  
     ntor = surfaceorder  
@@ -292,7 +288,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
 
             # 检查是否达到目标
             elif abs(vol_target) > abs(max_volume):
-                surf.set_dofs(s_save)
+                # surf.set_dofs(s_save)
                 print("Volume 达到目标，结束尝试。")
                 break
 
@@ -312,8 +308,8 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
             attempt+=1
             continue
 
-    boozer_surface = BoozerSurface(bs, surf, volume, max_volume)
-    res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
+    # boozer_surface = BoozerSurface(bs, surf, volume, max_volume)
+    # res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
     qs_error.append(NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J())
     residual_norm = np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     main_end_time = time()
@@ -445,7 +441,13 @@ if __name__ == "__main__":
 
     plasma_para,coil_para=coil_to_para(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6)
 
-
+    coils=coil_para.coils
+    surface=plasma_para.surface
+    from simsopt.geo import plotting
+    import matplotlib.pyplot as plt
+    plotting.plot([surface]+coils,show=False)
+    plt.savefig('coil_to_para.png', dpi=300)
+    plt.close() 
 
 
 

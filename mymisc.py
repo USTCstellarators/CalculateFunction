@@ -187,6 +187,18 @@ def nml_to_focus(nml_filename, focus_filename, nfp=2):
     print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
 
 
+def savefocussurface(surf, filename, nfp=1,mode=None):
+    '''
+    mode=[mpol,ntor]
+    '''
+    surf=surf.to_RZFourier()
+    if mode is not None:
+        surf.change_resolution(mode[0],mode[1])
+    surf.write_nml('temp.nml')
+    nml_to_focus("temp.nml", filename, nfp=surf.nfp)
+
+
+
 def rzp2curverz(lines,order=10):
     if not isinstance(lines, (list, np.ndarray)) or len(lines) == 0:
         raise ValueError("lines must be a non-empty list of fieldline point arrays.")
