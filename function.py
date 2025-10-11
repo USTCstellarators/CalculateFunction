@@ -10,7 +10,7 @@ from fieldarg import L_grad_B,distance_cp
 from fieldline import fullax,fullaxplot,from_simsopt,poincareplot
 from simsopt._core.util import Struct
 
-def generate_coils(curve_input, currents, nfp=1, stellsym=False):
+def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
     支持两种用法：
@@ -215,7 +215,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
 
 
 
-def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceorder=6,rz0=None,max_attempts=1000,max_volume=2.418, residual_tol=1e-10,alpha=0.3):
+def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorder=6,rz0=None,max_attempts=1000,max_volume=2.418, residual_tol=1e-10,alpha=0.3):
     '''
     输入k个傅里叶模数为n的线圈, 输出仿星器参数
     curve_input: (k, N) 或者CurveXYZFourier类    

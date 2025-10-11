@@ -3,7 +3,7 @@ import inspect
 from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZTensorFourier,CurveRZFourier
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-
+import os
 def is_cpp_bound(attr):
     try:
         if inspect.isbuiltin(attr):
@@ -187,16 +187,17 @@ def nml_to_focus(nml_filename, focus_filename, nfp=2):
     print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
 
 
-def savefocussurface(surf, filename, nfp=1,mode=None):
-    '''
-    mode=[mpol,ntor]
-    '''
-    surf=surf.to_RZFourier()
-    if mode is not None:
-        surf.change_resolution(mode[0],mode[1])
-    surf.write_nml('temp.nml')
-    nml_to_focus("temp.nml", filename, nfp=surf.nfp)
-
+def savefocussurface(surf, filename, nfp=1, mode=None):
+    tempfile = "temp.nml"
+    try:
+        surf = surf.to_RZFourier()
+        if mode is not None:
+            surf.change_resolution(mode[0], mode[1])
+        surf.write_nml(tempfile)
+        nml_to_focus(tempfile, filename, nfp=surf.nfp)
+    finally:
+        if os.path.exists(tempfile):
+            os.remove(tempfile)
 
 
 def rzp2curverz(lines,order=10):
