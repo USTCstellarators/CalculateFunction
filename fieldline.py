@@ -8,7 +8,8 @@ from simsopt.geo.curverzfourier import CurveRZFourier
 from numpy import arctan
 from mpl_toolkits.mplot3d import Axes3D
 from simsopt.geo import CurveXYZFourier
-from scipy.optimize import curve_fit,solve_ivp
+from scipy.optimize import curve_fit
+from scipy.integrate import solve_ivp
 import os
 from simsopt.field import (InterpolatedField, coils_via_symmetries, SurfaceClassifier,
                            compute_fieldlines, LevelsetStoppingCriterion, plot_poincare_data)
@@ -84,7 +85,7 @@ def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1, **kwargs):
     return np.array(lines)
 
 
-def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1, **kwargs):
+def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1,rtol=1e-8, **kwargs):
     """Trace magnetic field line in toroidal geometry
 
     Args:
@@ -125,8 +126,7 @@ def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1, **kwargs):
     print("Begin field-line tracing: ")
     if kwargs.get("method") is None:
         kwargs.update({"method": "LSODA"})  # using LSODE
-    if kwargs.get("rtol") is None:
-        kwargs.update({"rtol": 1e-6})  # minimum tolerance
+    print("rtol", rtol)
     # begin tracing
     dphi = 2 * np.pi / nfp / nstep
     phi = phi0 + dphi * nstep * np.arange(niter)
@@ -386,7 +386,7 @@ def fullaxplot(coils, rz0=None, phi0=0, bounds=None,
 
 
 
-def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,**kwargs):
+def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-8,**kwargs):
     #if bounds is None:
         #bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
     if rz0==None:
@@ -404,7 +404,7 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,**kwargs
             return 1e6  # 惩罚项，优化器会避开这组参数
 
         try:
-            lines = tracing(field, [rz[0]], [rz[1]], niter=niter, phi0=phi0, nstep=nstep,**kwargs)
+            lines = tracing(field, [rz[0]], [rz[1]], niter=niter, phi0=phi0, nstep=nstep,rtol=rtol,**kwargs)
             if not np.all(np.isfinite(lines)):
                 print(f"tracing() 返回包含 nan 的轨迹, rz = {rz}")
                 return 1e6

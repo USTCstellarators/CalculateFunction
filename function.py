@@ -381,7 +381,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=False,surfaceord
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None, plot=False,**kwargs):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None,rtol=1e-8, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -408,7 +408,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
 
     #用磁场找到磁轴
     cpcoils=from_simsopt(coils)
-    ma=fullax(cpcoils,rz0=rz0,**kwargs)
+    ma=fullax(cpcoils,rz0=rz0,rtol=rtol,**kwargs)
 
     mpol = surfaceorder  
     ntor = surfaceorder  
