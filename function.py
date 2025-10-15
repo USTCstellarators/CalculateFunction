@@ -1,7 +1,7 @@
 import numpy as np
 from time import time
 from simsopt.geo import (QfmResidual,boozer_surface_residual,BoozerSurface 
-                        , CurveLength, CurveXYZFourier,NonQuasiSymmetricRatio,Volume,plot,SurfaceXYZTensorFourier, 
+                        , CurveLength, CurveXYZFourier,NonQuasiSymmetricRatio,Volume,plotting,SurfaceXYZTensorFourier, 
                          Iotas,Area)
 from simsopt.field import BiotSavart,coils_via_symmetries, Current as SOCurrent
 import numbers
@@ -169,7 +169,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     #可视化
     items=bs.coils.copy()
     items.append(boozer_surface.surface)
-    plot(items,show=True)  
+    plotting.plot(items,show=True)  
     # # return
     surface=boozer_surface.surface
     qs_error/=len(surfaces)
@@ -236,9 +236,6 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorde
     main_start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
 
-    main_start_time = time()
-    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
-
     print([c.current.get_value() for c in coils])
 	#biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
@@ -261,7 +258,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorde
     items=coils.copy()
     items.append(surf)
     items.append(ma)
-    plot(items,show=True)
+    plotting.plot(items,show=True)
 
     volume = Volume(surf)#优化变量  
     vol_target =0#目标值

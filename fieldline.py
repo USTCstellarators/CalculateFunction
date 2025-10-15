@@ -16,6 +16,7 @@ from simsopt.field import (InterpolatedField, coils_via_symmetries, SurfaceClass
 import time
 from simsopt.mhd import Vmec
 from mymisc import rzp2curverz,from_simsopt,nml_to_focus
+
 def findrz0(coils):
     x=0.3*max(coils.data[0].x)+0.7*min(coils.data[0].x)
     y=0.3*max(coils.data[0].y)+0.7*min(coils.data[0].y)
@@ -126,7 +127,6 @@ def tracing(bfield, r0, z0, phi0=0.0, niter=100, nfp=1, nstep=1,rtol=1e-8, **kwa
     print("Begin field-line tracing: ")
     if kwargs.get("method") is None:
         kwargs.update({"method": "LSODA"})  # using LSODE
-    print("rtol", rtol)
     # begin tracing
     dphi = 2 * np.pi / nfp / nstep
     phi = phi0 + dphi * nstep * np.arange(niter)
@@ -409,19 +409,19 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-
                 print(f"tracing() 返回包含 nan 的轨迹, rz = {rz}")
                 return 1e6
             line = lines[0]
-            # ⬇️ 可视化 tracing 的轨迹
-            r_vals = [pt[0] for pt in line]
-            z_vals = [pt[1] for pt in line]
+            # # ⬇️ 可视化 tracing 的轨迹
+            # r_vals = [pt[0] for pt in line]
+            # z_vals = [pt[1] for pt in line]
             
-            plt.figure()
-            plt.plot(r_vals, z_vals, label=f"rz = {rz}")
-            plt.xlabel('r')
-            plt.ylabel('z')
-            plt.title(f'Tracing Line for rz = {rz}')
-            plt.legend()
-            plt.grid(True)
-            plt.show()  # 阻塞直到窗口关闭
-            
+            # plt.figure()
+            # plt.plot(r_vals, z_vals, label=f"rz = {rz}")
+            # plt.xlabel('r')
+            # plt.ylabel('z')
+            # plt.title(f'Tracing Line for rz = {rz}')
+            # plt.legend()
+            # plt.grid(True)
+            # plt.show()  # 阻塞直到窗口关闭
+            # plt.close()
             r = (line[1][0] - rz[0])**2 + (line[1][1] - rz[1])**2
             return r
             #print(lines)
