@@ -5,11 +5,11 @@ from simsopt.geo import (QfmResidual,boozer_surface_residual,BoozerSurface
                          Iotas,Area)
 from simsopt.field import BiotSavart,coils_via_symmetries, Current as SOCurrent
 import numbers
-from qsc import Qsc
+# from qsc import Qsc
 from fieldarg import L_grad_B,distance_cp
 from fieldline import fullax,fullaxplot,from_simsopt,poincareplot
 from simsopt._core.util import Struct
-
+from essos.coils import Coils_from_simsopt
 def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
@@ -386,7 +386,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     nfp: int
     stellsym: bool
     ''' 
-
+    from fieldline_essos import fullax_essos
 
 
     surfaceorder=4
@@ -437,7 +437,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plot(items,show=True)
+        plotting.plot(items,show=True)  
     return haveaxis,iota,qs_error
 
 
@@ -448,7 +448,7 @@ if __name__ == "__main__":
     #测试coil_to_para
     #测试coil_to_para
     import numpy as np
-    from simsopt.geo import plot
+    from simsopt.geo import plotting
     from simsopt._core import load, save
 
     ID = 958# ID可在scv文件中找到索引，以958为例
