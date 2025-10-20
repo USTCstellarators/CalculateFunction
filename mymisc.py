@@ -4,6 +4,7 @@ from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZTensorFourier,CurveR
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import os
+from scipy.optimize import curve_fit
 def is_cpp_bound(attr):
     try:
         if inspect.isbuiltin(attr):
@@ -206,7 +207,6 @@ def rzp2curverz(lines,order=10):
 
     def rz_cofficients(r_vals,z_vals,order,nfp):
         npoint=len(r_vals)
-        from scipy.optimize import curve_fit
         phi = np.linspace(0, 2 * np.pi/nfp, npoint)
         def R_fourier_series(phi,*a):
             n_terms = len(a)
@@ -244,6 +244,39 @@ def rzp2curverz(lines,order=10):
     curve.zs[:] = z_s[:order+1]
     curve.x = curve.get_dofs()
     return curve
+
+
+def rzp2curverznfp(lines, order=10, nfp=1):
+    """
+    将 tracingFULL() 输出的磁力线拟合为 CurveRZFourier 对象
+    """
+    if not isinstance(lines, (list, np.ndarray)) or len(lines) == 0:
+        raise ValueError("lines must be a non-empty list of fieldline point arrays.")
+
+    line = np.array(lines[0])
+    r_vals, z_vals, phi_vals = line[:, 0], line[:, 1], line[:, 2]
+
+    def R_fourier_series(phi, *a):
+        res = 0
+        for m, coeff in enumerate(a):
+            res += coeff * np.cos(nfp * m * phi)
+        return res
+
+    def Z_fourier_series(phi, *a):
+        res = 0
+        for m in range(1, len(a)):
+            res += a[m] * np.sin(nfp * m * phi)
+        return res
+
+    r_params, _ = curve_fit(R_fourier_series, phi_vals, r_vals, p0=np.zeros(order))
+    z_params, _ = curve_fit(Z_fourier_series, phi_vals, z_vals, p0=np.zeros(order))
+
+    curve = CurveRZFourier(quadpoints=len(phi_vals), order=order, nfp=nfp, stellsym=0)
+    curve.rc[:] = r_params[:order + 1]
+    curve.zs[:] = z_params[:order + 1]
+    curve.x = curve.get_dofs()
+    return curve
+
 
 def xyzp2curvexyz(points, order=10, nfp=1):
     """
