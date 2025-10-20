@@ -7,7 +7,7 @@ from scipy.optimize import minimize
 from simsopt.geo.curverzfourier import CurveRZFourier
 from numpy import arctan
 from mpl_toolkits.mplot3d import Axes3D
-from simsopt.geo import CurveXYZFourier
+from simsopt.geo import CurveXYZFourier,plotting
 from scipy.optimize import curve_fit
 from scipy.integrate import solve_ivp
 import os
@@ -409,19 +409,7 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-
                 print(f"tracing() 返回包含 nan 的轨迹, rz = {rz}")
                 return 1e6
             line = lines[0]
-            # # ⬇️ 可视化 tracing 的轨迹
-            # r_vals = [pt[0] for pt in line]
-            # z_vals = [pt[1] for pt in line]
-            
-            # plt.figure()
-            # plt.plot(r_vals, z_vals, label=f"rz = {rz}")
-            # plt.xlabel('r')
-            # plt.ylabel('z')
-            # plt.title(f'Tracing Line for rz = {rz}')
-            # plt.legend()
-            # plt.grid(True)
-            # plt.show()  # 阻塞直到窗口关闭
-            # plt.close()
+
             r = (line[1][0] - rz[0])**2 + (line[1][1] - rz[1])**2
             return r
             #print(lines)
@@ -626,12 +614,26 @@ def poincareplot(coils,phi0=0,rz0=[1,0],len=0.4,nfieldlines=8,point_num=100,s=No
 if __name__ == "__main__":
     from simsopt._core import load, save
     from simsopt.field import coils_to_focus, BiotSavart
-    from simsopt.geo import SurfaceRZFourier,CurveXYZFourier,plot
+    from simsopt.geo import SurfaceRZFourier,CurveXYZFourier    
+    ID = 958# ID可在scv文件中找到索引，以958为例
+    fID = ID // 1000  
+    [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
+    cpcoils=from_simsopt(coils)
+    ma=fullax(cpcoils,rz0=[0.876,0])
+    plotting.plot([ma])
+
+
+
+
+
+    from simsopt._core import load, save
+    from simsopt.field import coils_to_focus, BiotSavart
+    from simsopt.geo import SurfaceRZFourier,CurveXYZFourier
     ID = 400049# ID可在scv文件中找到索引，以958为例
     fID = ID // 1000  
     [surfaces, coils] = load(f'./inputs/serial{ID:07}.json')
     cpcoils=from_simsopt(coils)
-    # poincareplot(cpcoils,rz0=[1,0],len=0.1,show=True)#磁轴位置x: [ 8.763e-01  4.552e-06]
+    poincareplot(cpcoils,rz0=[0.8763,0],len=0.1,show=True)#磁轴位置x: [ 8.763e-01  4.552e-06]
 
 
     def field(pos):
@@ -646,18 +648,18 @@ if __name__ == "__main__":
     # print(axlist)
     ma=rzp2curverz(axlist)
 
-    axlist2=tracingFULL(field,[0.95],[0.1],niter=1,nstep=360)
+    axlist2=tracingFULL(field,[0.9],[0.3],niter=1,nstep=360)
     # print(type(axlist))
     # print(axlist)
     line2=rzp2curverz(axlist2)
 
-    axlist3=tracingFULL(field,[0.86],[0],niter=1,nstep=360)
+    axlist3=tracingFULL(field,[0.86],[-0.3],niter=1,nstep=360)
     # print(type(axlist))
     # print(axlist)
     line3=rzp2curverz(axlist3)
-    from simsopt.geo import plot
 
-    plot([line3,ma])
+
+    plotting.plot([line3,line2,ma])
 
 
     # from coilpy.surface import FourSurf
