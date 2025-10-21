@@ -7,9 +7,10 @@ from simsopt.field import BiotSavart,coils_via_symmetries, Current as SOCurrent
 import numbers
 # from qsc import Qsc
 from fieldarg import L_grad_B,distance_cp
-from fieldline import fullax,fullaxplot,from_simsopt,poincareplot
+from fieldline import fullax,from_simsopt,poincareplot
 from simsopt._core.util import Struct
-from essos.coils import Coils_from_simsopt
+from mymisc import coil2rz0
+
 def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
@@ -245,7 +246,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorde
     if ma is None:
         #用磁场找到磁轴,设定初始面
         cpcoils=from_simsopt(coils)
-        ma=fullaxplot(cpcoils,rz0=rz0,niter=1, nstep=10,save=True, save_dir="./opt_steps", prefix="trial")
+        ma=fullax(cpcoils,rz0=rz0,niter=1, nstep=10,save=True, save_dir="./opt_steps", prefix="trial")
 
     mpol = surfaceorder  
     ntor = surfaceorder  
@@ -378,7 +379,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorde
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=None,rtol=1e-8, plot=False,**kwargs):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=None,rtol=1e-8, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -386,13 +387,9 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     nfp: int
     stellsym: bool
     ''' 
-    from fieldline_essos import fullax_essos
 
 
-    surfaceorder=4
-
-    # 生成线圈（仅改动这里）
-    start_time = time()
+    # 生成线圈
     start_time = time()
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     print([c for c in currents])
@@ -402,11 +399,13 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     current_sum = sum(i for i in currents)
     G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
 
-
+    if rz0 is None:
+        rz0=[coil2rz0(coils[0]),0]
+        print(rz0)
     #用磁场找到磁轴
-    cpcoils=from_simsopt(coils)
-    ma=fullax(cpcoils,rz0=rz0,rtol=rtol,**kwargs)
-
+    # cpcoils=from_simsopt(coils)
+    ma=fullax(coils,rz0=rz0,rtol=rtol,**kwargs)
+    plotting.plot([ma]+coils,show=True)
     mpol = surfaceorder  
     ntor = surfaceorder  
     phis = np.linspace(0, 1/nfp, 2*ntor+1, endpoint=False)
@@ -414,12 +413,12 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=False,surfaceorder=6,rz0=
     surf = SurfaceXYZTensorFourier(
     mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
     # surf.least_squares_fit(surfRZ.gamma())
-    surf.fit_to_curve(ma, 0.005, flip_theta=True)
+    surf.fit_to_curve(ma, 0.05, flip_theta=True)
     volume = Volume(surf)
-    # vol_target=volume.J()
-    vol_target=-0.0001
+    vol_target=volume.J()
+    # vol_target=-0.0001
     boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
-    res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100, G=G0)
+    res = boozer_surface.minimize_boozer_penalty_constraints_newton(tol=1e-12, maxiter=100, G=G0)
 
     iota=res['iota']
     qs_error=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J()

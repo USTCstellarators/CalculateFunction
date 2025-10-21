@@ -248,35 +248,52 @@ def rzp2curverz(lines,order=10):
 
 def rzp2curverznfp(lines, order=10, nfp=1):
     """
-    将 tracingFULL() 输出的磁力线拟合为 CurveRZFourier 对象
+    将磁力线 (R,Z) 拟合成 CurveRZFourier，支持任意 nfp。
+    完全遵循 rzp2curverz 的结构，仅在内部加入 nfp 逻辑。
     """
     if not isinstance(lines, (list, np.ndarray)) or len(lines) == 0:
         raise ValueError("lines must be a non-empty list of fieldline point arrays.")
 
-    line = np.array(lines[0])
-    r_vals, z_vals, phi_vals = line[:, 0], line[:, 1], line[:, 2]
+    def rz_cofficients(r_vals, z_vals, order, nfp):
+        npoint = len(r_vals)
+        phi = np.linspace(0, 2 * np.pi / nfp, npoint)
 
-    def R_fourier_series(phi, *a):
-        res = 0
-        for m, coeff in enumerate(a):
-            res += coeff * np.cos(nfp * m * phi)
-        return res
+        def R_fourier_series(phi, *a):
+            n_terms = len(a)
+            result = 0
+            for m in range(n_terms):
+                result += a[m] * np.cos(nfp * m * phi)
+            return result
 
-    def Z_fourier_series(phi, *a):
-        res = 0
-        for m in range(1, len(a)):
-            res += a[m] * np.sin(nfp * m * phi)
-        return res
+        def Z_fourier_series(phi, *a):
+            n_terms = len(a)
+            result = 0
+            for m in range(1, n_terms):
+                result += a[m] * np.sin(nfp * m * phi)
+            return result
 
-    r_params, _ = curve_fit(R_fourier_series, phi_vals, r_vals, p0=np.zeros(order))
-    z_params, _ = curve_fit(Z_fourier_series, phi_vals, z_vals, p0=np.zeros(order))
+        def fit_fourier_series(phi, R, Z, order):
+            initial_guess = np.zeros(order)
+            r_params, _ = curve_fit(R_fourier_series, phi, R, p0=initial_guess)
+            z_params, _ = curve_fit(Z_fourier_series, phi, Z, p0=initial_guess)
+            r_c = r_params
+            z_s = z_params[1:]
+            return r_c, z_s
 
-    curve = CurveRZFourier(quadpoints=len(phi_vals), order=order, nfp=nfp, stellsym=0)
-    curve.rc[:] = r_params[:order + 1]
-    curve.zs[:] = z_params[:order + 1]
+        r_c, z_s = fit_fourier_series(phi, r_vals, z_vals, order)
+        return r_c, z_s
+
+    curve = CurveRZFourier(quadpoints=len(lines[0]), order=order, nfp=nfp, stellsym=0)
+    (r_c, z_s) = rz_cofficients(
+        np.array([p[0] for p in lines[0]]),
+        np.array([p[1] for p in lines[0]]),
+        order=order + 1,
+        nfp=nfp
+    )
+    curve.rc[:] = r_c[:order + 1]
+    curve.zs[:] = z_s[:order + 1]
     curve.x = curve.get_dofs()
     return curve
-
 
 def xyzp2curvexyz(points, order=10, nfp=1):
     """
@@ -293,7 +310,21 @@ def xyzp2curvexyz(points, order=10, nfp=1):
     curve=None
     return curve
 
+def rzphi_to_xyz(r, z, phi):
+    """
+    将圆柱坐标 (r, φ, z) 转换为笛卡尔坐标 (x, y, z)
 
+    参数：
+        r: 半径，可以是标量或数组
+        z: 高度，可以是标量或数组
+        phi: 方位角（弧度制），可以是标量或数组
+
+    返回：
+        x, y, z （与输入形状相同）
+    """
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
+    return x, y, z    
 
 def plot3D(fieldline,show=True):
     """
@@ -659,6 +690,18 @@ def fieldline2xyzsurfacefit(fieldline, axisline, m, n, nfp,mpol,ntor):
 #     surf.least_squares_fit(gamma)
 #     return surf
 
+def surface2rz0(surface):
+    x=surface.gamma()[0,:,0]
+    y=surface.gamma()[0,:,1]
+    r0=np.mean(np.sqrt(x**2+y**2))
+    return r0
+
+def coil2rz0(coil):
+    gamma=coil.curve.gamma()
+    x=gamma[:,0]
+    y=gamma[:,1]
+    r0=np.mean(np.sqrt(x**2+y**2))
+    return r0
 
 def from_simsopt(simsopt_coils):
     from coilpy import Coil as CoilpyCoil

@@ -16,7 +16,7 @@ from simsopt.field import (InterpolatedField, coils_via_symmetries, SurfaceClass
 from simsopt.field import BiotSavart as simsopt_BiotSavart
 import time
 from simsopt.mhd import Vmec
-from mymisc import rzp2curverz,from_simsopt,nml_to_focus,rzp2curverznfp,rzphi_to_xyz
+from mymisc import rzp2curverz,from_simsopt,nml_to_focus,rzp2curverznfp,rzphi_to_xyz,coil2rz0
 
 def findrz0(coils):
     rz0 = np.mean([
@@ -85,7 +85,7 @@ def save_line_image(line_rzphi):
 def tracing(
     bfield, r0, z0, phi0=0.0,
     niter=1, nfp=1, nstep=1,
-    rtol=1e-6, method='LSODA', **kwargs
+    rtol=1e-6, method='BDF', **kwargs
 ):
     """
     轻量版磁力线追踪：
@@ -104,7 +104,7 @@ def tracing(
         except ZeroDivisionError:
             return [0.0, 0.0]
 
-        eps = 1e-9
+        eps = 1e-10
         if not np.isfinite(Bphi) or abs(Bphi) < eps:
             return [0.0, 0.0]
         return [Br/Bphi, Bz/Bphi]
@@ -136,7 +136,7 @@ def tracingFULL(
     bfield, r0, z0, phi0=0.0,
     order=10, niter=100, nfp=1, nstep=1,
     FullLine=True, show_progress=False,
-    plot=False, save_dir="frames",rtol=1e-6,method='LSODA', **kwargs
+    plot=False, save_dir="frames",rtol=1e-6,method='BDF', **kwargs
 ):
     """Trace magnetic field line in toroidal geometry.
     
@@ -157,7 +157,7 @@ def tracingFULL(
         except ZeroDivisionError:
             return [0.0, 0.0]
 
-        eps = 1e-9 
+        eps = 1e-10
         if not np.isfinite(Bphi) or abs(Bphi) < eps:
             return [0.0, 0.0]
         return [Br/Bphi, Bz/Bphi]
@@ -201,15 +201,16 @@ def tracingFULL(
 
 
 
-def fullax(coils,nfp,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-6,plot=False,**kwargs):
+def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-6,plot=False,**kwargs):
     if bounds is None:
         bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
-    res=findax(coils,rz0=rz0,phi0=phi0,bounds=bounds,rtol=rtol,plot=plot,**kwargs)
+    cpcoils=from_simsopt(coils)
+    res=findax(cpcoils,rz0=rz0,phi0=phi0,bounds=bounds,rtol=rtol,plot=plot,**kwargs)
     ##for coilpy coils
     def field(pos):
         b=0
-        for i in range(len(coils)):
-            b+=coils.data[i].bfield_HH(pos)
+        for i in range(len(cpcoils)):
+            b+=cpcoils.data[i].bfield_HH(pos)
         # print(pos,'->',b)
         return b
 
@@ -222,7 +223,7 @@ def fullax(coils,nfp,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol
     axlist=tracingFULL(field,[res[0]],[res[1]],niter=1,nstep=360,phi0=phi0,FullLine=1,**kwargs)
     # print(type(axlist))
     # print(axlist)
-    ma=rzp2curverznfp(axlist,nfp)
+    ma=rzp2curverz(axlist)
     return ma
 
 
@@ -259,7 +260,7 @@ def findax(coils,rz0=None,phi0=0,bounds=None,rtol=1e-6,plot=False,**kwargs):
         #print(r)
         lines=None
         return r
-    res=minimize(fun,rz0,method='L-BFGS-B',bounds=bounds)
+    res=minimize(fun,rz0,method='COBYQA',bounds=bounds)
     print(res)
     return res.x
 
@@ -429,7 +430,7 @@ if __name__ == "__main__":
     from simsopt.field import coils_to_focus, BiotSavart
     from simsopt.geo import SurfaceRZFourier,CurveXYZFourier,plotting
     import matplotlib.pyplot as plt
-    ID = 1662940# ID可在scv文件中找到索引，以958为例
+    ID = 400049# ID可在scv文件中找到索引，以958为例
     fID = ID // 1000  
     [surfaces, coils] = load(f'../../projects/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
     x=surfaces[0].gamma()[0,:,0]
