@@ -81,11 +81,10 @@ def save_line_image(line_rzphi):
 
 
 
-
 def tracing(
     bfield, r0, z0, phi0=0.0,
     niter=1, nfp=1, nstep=1,
-    rtol=1e-6, method='BDF', **kwargs
+    rtol=1e-8, method='BDF'
 ):
     """
     轻量版磁力线追踪：
@@ -104,7 +103,7 @@ def tracing(
         except ZeroDivisionError:
             return [0.0, 0.0]
 
-        eps = 1e-10
+        eps = 1e-9
         if not np.isfinite(Bphi) or abs(Bphi) < eps:
             return [0.0, 0.0]
         return [Br/Bphi, Bz/Bphi]
@@ -122,7 +121,7 @@ def tracing(
             phi_start = phi[j]
             for _ in range(nstep):
                 sol = solve_ivp(fieldline, (phi_start, phi_start + dphi), rz,
-                                method=method, rtol=rtol, **kwargs)
+                                method=method, rtol=rtol)
                 rz = sol.y[:, -1]
                 phi_start += dphi
             points.append(rz)  # 只存每圈末点
@@ -132,11 +131,12 @@ def tracing(
 
 
 
+
 def tracingFULL(
     bfield, r0, z0, phi0=0.0,
     order=10, niter=100, nfp=1, nstep=1,
     FullLine=True, show_progress=False,
-    plot=False, save_dir="frames",rtol=1e-6,method='BDF', **kwargs
+    plot=False, save_dir="frames",rtol=1e-8,method='BDF'
 ):
     """Trace magnetic field line in toroidal geometry.
     
@@ -178,7 +178,7 @@ def tracingFULL(
             rz = points[-1]
             phi_start = phi[j]
             for _ in range(nstep):
-                sol = solve_ivp(fieldline, (phi_start, phi_start + dphi), rz, **kwargs)
+                sol = solve_ivp(fieldline, (phi_start, phi_start + dphi), rz)
                 rz = sol.y[:, -1]
                 phi_start += dphi
                 po.append([rz[0], rz[1], phi_start])
@@ -201,16 +201,17 @@ def tracingFULL(
 
 
 
-def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-6,plot=False,**kwargs):
-    if bounds is None:
-        bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
-    cpcoils=from_simsopt(coils)
-    res=findax(cpcoils,rz0=rz0,phi0=phi0,bounds=bounds,rtol=rtol,plot=plot,**kwargs)
+def fullax(coils,rz0=None,phi0=0,nfp=1,bounds=None,order=10,niter=1, nstep=10,method='BDF',rtol=1e-6,plot=False):
+    # if bounds is None:
+    #     bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.01,0.01)]
+
+    res=findax(coils,rz0=rz0,phi0=phi0,nfp=nfp,bounds=bounds,rtol=rtol,method=method)
     ##for coilpy coils
+    coils=from_simsopt(coils)
     def field(pos):
         b=0
-        for i in range(len(cpcoils)):
-            b+=cpcoils.data[i].bfield_HH(pos)
+        for i in range(len(coils)):
+            b+=coils.data[i].bfield_HH(pos)
         # print(pos,'->',b)
         return b
 
@@ -220,7 +221,7 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-
     #     fl.set_points(np.array([pos]))
     #     b=fl.B()[0]
     #     return b
-    axlist=tracingFULL(field,[res[0]],[res[1]],niter=1,nstep=360,phi0=phi0,FullLine=1,**kwargs)
+    axlist=tracingFULL(field,[res[0]],[res[1]],niter=1,nstep=360,phi0=phi0,FullLine=1)
     # print(type(axlist))
     # print(axlist)
     ma=rzp2curverz(axlist)
@@ -228,9 +229,11 @@ def fullax(coils,rz0=None,phi0=0,bounds=None,order=10,niter=1, nstep=10,rtol=1e-
 
 
 
-def findax(coils,rz0=None,phi0=0,bounds=None,rtol=1e-6,plot=False,**kwargs):
-    if bounds is None:
-        bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.1,0.1)]
+
+def findax(coils,rz0=None,phi0=0,nfp=1,bounds=None,rtol=1e-6,method='BDF',plot=False):
+    # if bounds is None:
+    #     bounds=[(rz0[0]-0.3,rz0[0]+0.3),(-0.01,0.01)]
+    coils=from_simsopt(coils)
     # if rz0==None:
     #     rz0=[findrz0(coils),0]
     ##for coilpy coils
@@ -249,7 +252,7 @@ def findax(coils,rz0=None,phi0=0,bounds=None,rtol=1e-6,plot=False,**kwargs):
     #     return b
     def fun(rz):
         # lines=tracingFULL(field,[rz[0]],[rz[1]],niter=1,nstep=360,phi0=phi0,rtol=rtol,plot=plot,**kwargs)
-        lines=tracing(field,[rz[0]],[rz[1]],niter=1,phi0=phi0,rtol=rtol,**kwargs)
+        lines=tracing(field,[rz[0]],[rz[1]],niter=1,nfp=nfp,phi0=phi0,method=method,rtol=rtol)
         # if plot:
             # lines=tracingFULL(field,[rz[0]],[rz[1]],niter=1,nstep=360,phi0=phi0,plot=plot,**kwargs)
         # else:
@@ -263,6 +266,7 @@ def findax(coils,rz0=None,phi0=0,bounds=None,rtol=1e-6,plot=False,**kwargs):
     res=minimize(fun,rz0,method='COBYQA',bounds=bounds)
     print(res)
     return res.x
+
 
 def trace_fieldline_wout(filename):
     vmec = Vmec(filename)
