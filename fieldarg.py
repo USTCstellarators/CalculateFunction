@@ -4,26 +4,75 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def Bmod(s,cs,po=None):
+import numpy as np
+from simsopt.field import BiotSavart
+
+def modB(cs, s=None, po=None):
     '''
-    input:
-        s,simsopt面
-        cs,simsopt线圈
-        po,计算网格
+    Compute magnetic field magnitude and vector at points.
+
+    Parameters:
+        cs: list of simsopt coils
+        s : simsopt surface (optional if po is provided)
+        po: shape (m, n, 3), grid points (optional if s is provided)
+
+    Returns:
+        modB: shape (m, n), |B| at each grid point
+        B   : shape (m, n, 3), magnetic field vector at each point
     '''
-    field = BiotSavart(cs)  # Multiple coils can be included in the list
+    field = BiotSavart(cs)
+
     if po is None:
-        po=s.gamma()
-        print(f"po.shape={po.shape}")
-    (m,n,_)=po.shape
+        if s is None:
+            raise ValueError("Either surface s or points po must be provided.")
+        po = s.gamma()
+        print(f"po.shape = {po.shape}")
+
+    m, n, _ = po.shape
     po = np.ascontiguousarray(po.reshape(-1, 3), dtype=np.float64)
 
-    field.set_points(np.array(po))
+    field.set_points(po)
 
-    modB = field.AbsB()
+    B = field.B()              # (m*n, 3)
+    modB = field.AbsB()        # (m*n,)
 
-    modB=modB.reshape(m, n)
-    return modB
+    B = B.reshape(m, n, 3)
+    modB = modB.reshape(m, n)
+
+    return modB, B
+
+
+
+def gradB(cs, s=None, po=None):
+    '''
+    Compute Frobenius norm and gradient tensor ∇B of the magnetic field.
+
+    Parameters:
+        cs: list of simsopt coils
+        s : simsopt surface (optional if po is provided)
+        po: shape (m, n, 3), grid points (optional if s is provided)
+
+    Returns:
+        gradB_frobenius: shape (m, n), Frobenius norm of ∇B
+        gradB_tensor   : shape (m, n, 3, 3), ∇B tensor at each point
+    '''
+    field = BiotSavart(cs)
+
+    if po is None:
+        if s is None:
+            raise ValueError("Either surface s or points po must be provided.")
+        po = s.gamma()
+
+    m, n, _ = po.shape
+    po = np.ascontiguousarray(po.reshape(-1, 3), dtype=np.float64)
+
+    field.set_points(po)
+
+    gradB_all = field.dB_by_dX()              # (m*n, 3, 3)
+    gradB_tensor = gradB_all.reshape(m, n, 3, 3)
+    gradB_frobenius = np.linalg.norm(gradB_tensor, axis=(2, 3))  # (m, n)
+
+    return gradB_frobenius, gradB_tensor
 
 
 def L_grad_B(cs,s=None,po=None):
