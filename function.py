@@ -11,7 +11,7 @@ from fieldarg import L_grad_B,distance_cp
 from fieldline import fullax,from_simsopt,poincareplot
 from simsopt._core.util import Struct
 from mymisc import coil2rz0
-
+import matplotlib.pyplot as plt
 def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
     根据 curve_input 与 currents 生成带对称性的 coils 对象。
@@ -405,7 +405,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     if rz0 is None:
         rz0=[coil2rz0(coils[0]),0]
-        print(rz0)
+    print(f'initial guess:rz0={rz0}')
     #用磁场找到磁轴
     # plotting.plot(coils,show=True)
 
@@ -415,6 +415,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
 
 	#biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
+    bstf = BiotSavart(coils)
     current_sum = sum(i for i in currents)
     G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
 
@@ -425,44 +426,89 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
     surf = SurfaceXYZTensorFourier(
     mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
     # surf.least_squares_fit(surfRZ.gamma())
-    surf.fit_to_curve(ma, 0.1, flip_theta=True)
+    surf.fit_to_curve(ma, 0.005, flip_theta=True)
+
     volume = Volume(surf)
-    vol_target=volume.J()
-    # vol_target=-0.001
+    # vol_target=volume.J()
+    vol_target=-0.001
     boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
-    res = boozer_surface.minimize_boozer_exact_constraints_newton(tol=1e-10, maxiter=100, G=G0)
+
+
+    # volume = Area(surf)
+    # vol_target=volume.J()
+    # # vol_target=-0.001
+    # boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
+
+
+    # volume = ToroidalFlux(surf,bstf)
+    # vol_target=volume.J()
+    # # vol_target=-0.001
+    # boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
+
+
+    
+    #####第一步
+    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=10000,iota=-1.9,G=G0,constraint_weight=1000)
     end_time1 = time()
     if plot:
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=True)  
+        plotting.plot(items,show=False)  
+        plt.savefig('boozer1.png')
     haveaxis = False
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     if residual_norm<1e-9:
         haveaxis = True
     print(f"第一步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行时间：{end_time1 - start_time:.4f} 秒")
+    #####第二步
+    surf2 = SurfaceXYZTensorFourier(
+    mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
+    surf2.set_dofs(surf.get_dofs())
 
-    boozer_surface.need_to_run_code = True
-    res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-10, maxiter=1000, G=res['G'])
+
+
+    volume2 = Volume(surf2)
+    vol_target2=volume.J()
+    # vol_target=-0.001
+    boozer_surface2 = BoozerSurface(bs, surf2, volume2, vol_target2)
+
+
+    # volume2 = Area(surf2)
+    # vol_target2=volume.J()
+    # # vol_target=-0.001
+    # boozer_surface2 = BoozerSurface(bs, surf2, volume2, vol_target2)
+
+
+    # volume2 = ToroidalFlux(surf2,bstf)
+    # vol_target2=volume.J()
+    # # vol_target=-0.001
+    # boozer_surface2 = BoozerSurface(bs, surf2, volume2, vol_target2)
+
+
+
+
+    boozer_surface2.need_to_run_code = True
+    res = boozer_surface2.solve_residual_equation_exactly_newton(tol=1e-10, maxiter=100,iota=res["iota"],G=res["G"])
 
     iota=res['iota']
-    qs_error=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J()
+    qs_error=NonQuasiSymmetricRatio(boozer_surface2, BiotSavart(coils)).J()
 
-    residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
+    residual_norm= np.linalg.norm(boozer_surface_residual(surf2, res["iota"], res["G"], bs, derivatives=0))
 
     if residual_norm<1e-9:
         haveaxis = True
     
     end_time2 = time()
     
-    print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行总时间：{end_time2 - start_time:.4f} 秒")
+    print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target2}, volume={volume2.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行总时间：{end_time2 - start_time:.4f} 秒")
 
     if plot:
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=True)  
+        plotting.plot(items,show=False)  
+        plt.savefig('boozer2.png') 
     return haveaxis,iota,qs_error
 
 
@@ -481,7 +527,7 @@ def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     if rz0 is None:
         rz0=[coil2rz0(coils[0]),0]
-        print(rz0)
+    print(f'initial guess:rz0={rz0}')
     #用磁场找到磁轴
     # plotting.plot(coils,show=True)
 
@@ -512,7 +558,8 @@ def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=True)  
+        plotting.plot(items,show=False)  
+        plt.savefig('boozer1.png')
     haveaxis = False
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     if residual_norm<1e-9:
@@ -538,7 +585,8 @@ def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=True)  
+        plotting.plot(items,show=False)  
+        plt.savefig('boozer2.png')
     return haveaxis,iota,qs_error
 
 
@@ -557,7 +605,10 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     if rz0 is None:
         rz0=[coil2rz0(coils[0]),0]
-        print(rz0)
+    print(f'initial guess:rz0={rz0}')
+    for coil in coils:
+        coil.fix_all()  
+
     #用磁场找到磁轴
     # plotting.plot(coils,show=True)
 
@@ -578,7 +629,7 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
     surf = SurfaceXYZTensorFourier(
     mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
     # surf.least_squares_fit(surfRZ.gamma())
-    surf.fit_to_curve(ma, 0.1, flip_theta=True)
+    surf.fit_to_curve(ma, 0.01, flip_theta=True)
     #########第一步
 
     tf = ToroidalFlux(surf, bs_tf)
@@ -594,28 +645,35 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=True)  
+        plotting.plot(items,show=False)  
+        plt.savefig('qfm.png')
     #########第二步
     volume = Volume(surf)
     vol_target=volume.J()
     # vol_target=-0.001
     boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
-    res = boozer_surface.minimize_boozer_exact_constraints_newton(tol=1e-10, maxiter=100)
+    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=100)
 
     boozer_surface.need_to_run_code = True
 
     iota=iota=res['iota']
     haveaxis = False
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
-    qs_error=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J()
+    # qs_error=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J()
     if residual_norm<1e-9:
         haveaxis = True
+    if plot:
+        items=coils.copy()
+        items.append(surf)
+        items.append(ma)
+        plotting.plot(items,show=False)  
+        plt.savefig('boozer.png')
     end_time2 = time()
     
-    print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis},qferror={qs_error:.8e}, 运行总时间：{end_time2 - start_time:.4f} 秒")
+    print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行总时间：{end_time2 - start_time:.4f} 秒")
 
 
-    return haveaxis,iota.J(),qs_error
+    return haveaxis,iota,residual_norm
 
 
 
@@ -628,12 +686,12 @@ if __name__ == "__main__":
     from simsopt.geo import plotting
     from simsopt._core import load, save
 
-    ID = 1667667# ID可在scv文件中找到索引，以958为例
+    ID = 1857206# ID可在scv文件中找到索引，以958为例
 
     fID = ID // 1000 
-    [surfaces, coils] = load(f'../../projects/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
+    [surfaces, coils] = load(f'/home/zhouyebi/code/project/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
 
-    haveaxis,iota,qs_error=coil_to_axis_qfm([c.curve for c in coils[0:3]],[c.current.get_value() for c in coils[0:3]],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
+    haveaxis,iota,qs_error=coil_to_axis([c.curve for c in coils[0:3]],[c.current.get_value() for c in coils[0:3]],rz0=[1.306,0],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
 
     #,method='BDF'
 
