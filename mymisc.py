@@ -633,6 +633,79 @@ def xyz2surface(XYZ, nfp,  mpol, ntor):
     return surf
 
 
+def gamma2volume(gamma):
+    """
+    由 (n_phi, n_theta, 3) 表面网格 gamma 计算封闭体体积。
+    假设 phi、theta 在 [0, 2π) 上均匀、周期采样。
+    """
+    gamma = np.asarray(gamma, dtype=float)
+    assert gamma.ndim == 3 and gamma.shape[2] == 3, "gamma 需为 (n_phi, n_theta, 3)"
+    n_phi, n_theta, _ = gamma.shape
+
+    dphi   = 2.0 * np.pi / n_phi
+    dtheta = 2.0 * np.pi / n_theta
+
+    r_ip1 = np.roll(gamma, -1, axis=0)
+    r_im1 = np.roll(gamma,  1, axis=0)
+    r_jp1 = np.roll(gamma, -1, axis=1)
+    r_jm1 = np.roll(gamma,  1, axis=1)
+
+    r_phi   = (r_ip1 - r_im1) / (2.0 * dphi)
+    r_theta = (r_jp1 - r_jm1) / (2.0 * dtheta)
+
+    n_area = np.cross(r_phi, r_theta) * (dphi * dtheta)  # 面积加权法向微元
+    integrand = np.einsum('ijk,ijk->ij', gamma, n_area)  # r·n_area
+    volume = integrand.sum() / 3.0
+    return float(volume)
+
+def _poly_area_RZ(R, Z):
+    """
+    R-Z 平面闭合多边形面积（鞋带公式），R,Z 为按 θ 顺序的 1D 数组。
+    返回正面积（取绝对值）。
+    """
+    Rp = np.r_[R, R[0]]
+    Zp = np.r_[Z, Z[0]]
+    cross = Rp[:-1] * Zp[1:] - Rp[1:] * Zp[:-1]
+    return abs(0.5 * cross.sum())
+
+def gamma2Ra(gamma):
+    """
+    从 (n_phi, n_theta, 3) 的 γ 网格 (X,Y,Z) 计算 (R_major, a_minor)：
+      - a 由等 φ 截面面积的均值定义:  mean(A_phi) = π a^2
+      - R 由总体积: V = 2π R · π a^2
+    假设 φ,θ 为 [0,2π) 均匀周期采样。
+    """
+    gamma = np.asarray(gamma, dtype=float)
+    assert gamma.ndim == 3 and gamma.shape[2] == 3, "gamma 需为 (n_phi, n_theta, 3)"
+    n_phi, n_theta, _ = gamma.shape
+
+    X = gamma[..., 0]
+    Y = gamma[..., 1]
+    Z = gamma[..., 2]
+    R_cyl = np.sqrt(X**2 + Y**2)          # (n_phi, n_theta)
+
+    # 每个 φ 切片的 R-Z 截面面积
+    A_list = np.empty(n_phi)
+    for i in range(n_phi):
+        A_list[i] = _poly_area_RZ(R_cyl[i, :], Z[i, :])
+
+    A_mean = np.nanmean(A_list)
+    if not np.isfinite(A_mean) or A_mean <= 0:
+        raise ValueError("截面面积均值无效（可能网格顺序不闭合或退化）。")
+
+    a = np.sqrt(A_mean / np.pi)
+
+    V = gamma2volume(gamma)
+    V = abs(V)  # 若参数化朝向使体积为负，取绝对值
+
+    denom = 2.0 * (np.pi**2) * (a**2)
+    if denom <= 0:
+        raise ValueError("a 过小或为零，无法计算大半径 R。")
+    R = V / denom
+
+    return float(R), float(a)
+
+
 def fieldline2rzsurface(fieldline, axisline, m, n, nfp,mpol,ntor):
     R,Z=fieldline2rz(fieldline, axisline, m, n, nfp)
     return rz2surface(R,Z,nfp,mpol,ntor)
