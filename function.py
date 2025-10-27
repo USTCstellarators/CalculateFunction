@@ -10,7 +10,7 @@ import numbers
 from fieldarg import L_grad_B,distance_cp
 from fieldline import fullax,from_simsopt,poincareplot
 from simsopt._core.util import Struct
-from mymisc import coil2rz0
+from mymisc import coil2rz0,savefocusinput
 import matplotlib.pyplot as plt
 def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
@@ -456,6 +456,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
         items.append(ma)
         plotting.plot(items,show=False)  
         plt.savefig('boozer1.png')
+        savefocusinput(surf,None,'boozer1.boundary')
     haveaxis = False
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     if residual_norm<1e-9:
@@ -509,6 +510,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
         items.append(ma)
         plotting.plot(items,show=False)  
         plt.savefig('boozer2.png') 
+        savefocusinput(surf2,None,'boozer2.boundary')
     return haveaxis,iota,qs_error
 
 
@@ -647,6 +649,7 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
         items.append(ma)
         plotting.plot(items,show=False)  
         plt.savefig('qfm.png')
+        savefocusinput(surf,None,'qfm.boundary')
     #########第二步
     volume = Volume(surf)
     vol_target=volume.J()
@@ -668,6 +671,7 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
         items.append(ma)
         plotting.plot(items,show=False)  
         plt.savefig('boozer.png')
+        savefocusinput(surf,None,'boozer.boundary')
     end_time2 = time()
     
     print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行总时间：{end_time2 - start_time:.4f} 秒")
@@ -685,107 +689,22 @@ if __name__ == "__main__":
     import numpy as np
     from simsopt.geo import plotting
     from simsopt._core import load, save
-
+    from simsopt.field import coils_to_focus
     ID = 1857206# ID可在scv文件中找到索引，以958为例
 
     fID = ID // 1000 
     [surfaces, coils] = load(f'/home/zhouyebi/code/project/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
+    # savefocusinput(surfaces[-1],coils)
+    num=int(len(coils)/2/surfaces[0].nfp)
+    haveaxis,iota,qs_error=coil_to_axis_qfm([c.curve for c in coils[0:num]],[c.current.get_value() for c in coils[0:num]],rz0=[1.306,0],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
 
-    haveaxis,iota,qs_error=coil_to_axis([c.curve for c in coils[0:3]],[c.current.get_value() for c in coils[0:3]],rz0=[1.306,0],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
-
-    #,method='BDF'
+    # #,method='BDF'
 
 
     print(haveaxis)
     print(iota)
     print(qs_error)
 
-
-
-    # currents = [c.current.get_value() for c in coils]
-    # order=4
-    # print(surfaces[0].nfp)
-    # base_curves = [c.curve for c in coils]
-    # curve_input=[cur.x for cur in base_curves]
-    # print(curve_input)
-    # print(np.array(curve_input).shape)
-    # print(curve_input)
-    # print(np.array(curve_input).shape)
-
-    # plasma_para,coil_para=coil_to_para(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6)
-
-    # coils=coil_para.coils
-    # surface=plasma_para.surface
-    # from simsopt.geo import plotting
-    # import matplotlib.pyplot as plt
-    # plotting.plot([surface]+coils,show=False)
-    # plt.savefig('coil_to_para.png', dpi=300)
-    # plt.close() 
-
-
-
-
-
-
-    # #测试coil_to_axis
-    # import numpy as np
-    # from simsopt.geo import plot
-    # from simsopt._core import load, save
-
-    # ID = 958# ID可在scv文件中找到索引，以958为例 2408903
-    # fID = ID // 1000 
-    # [surfaces, coils] = load(f'../simsopt_serials/{fID:04}/serial{ID:07}.json')
-
-    # currents = [c.current.get_value() for c in coils]
-    # order=4
-    # base_curves = [c.curve for c in coils]
-    # curve_input=[cur.x for cur in base_curves]
-    # print('nfp',surfaces[0].nfp)
-    # # print(curve_input)
-    # # print(np.array(curve_input).shape)
-
-    # # 保存
-
-    # from mymisc import nml_to_focus
-
-    # surf=surfaces[-1]
-
-    # surf=surf.to_RZFourier()
-    # #surf.change_resolution(12,12)
-    # surf.write_nml('temp.nml')
-
-
-    # from coilpy.surface import FourSurf
-
-    # nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
-
-    # print('nfp',surfaces[0].nfp)
-
-    # nml_to_focus("temp.nml", "poincare.boundary", nfp=surf.nfp)
-
-    # print('nfp',surfaces[0].nfp)
-    # from simsopt.field import coils_to_focus
-    # coils_to_focus('poincare.focus', curves=[c.curve for c in coils], currents=[c.current for c in coils], nfp=surfaces[0].nfp, stellsym=True)
-
-
-    # # 测试
-
-    # haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
-
-    # print(haveaxis)
-    # print(iota)
-    # print(qs_error)
-
-    # coils_to_focus('poincare.focus', curves=[c.curve for c in coils], currents=[c.current for c in coils], nfp=surfaces[0].nfp, stellsym=True)
-
-
-    # # 测试
-
-    # haveaxis,iota,qs_error=coil_to_axis(base_curves, currents,nfp=surfaces[0].nfp,stellsym=True,surfaceorder=6, plot=True)
-
-    # print(haveaxis)
-    # print(iota)
-    # print(qs_error)
 
 
 

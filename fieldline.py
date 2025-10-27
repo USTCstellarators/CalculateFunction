@@ -203,7 +203,7 @@ def tracingFULL(
 
 def fullax(coils,rz0=None,phi0=0,nfp=1,bounds=None,order=10,niter=1, nstep=10,method='BDF',rtol=1e-6,plot=False):
     # if bounds is None:
-    #     bounds=[(rz0[0]-0.5,rz0[0]+0.5),(-0.01,0.01)]
+    #     bounds=[(rz0[0]-0.5,rz0[0]+  0.5),(-0.01,0.01)]
 
     res=findax(coils,rz0=rz0,phi0=phi0,nfp=nfp,bounds=bounds,rtol=rtol,method=method)
     ##for coilpy coils
