@@ -448,7 +448,7 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
 
     
     #####第一步
-    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=10000,iota=-1.9,G=G0,constraint_weight=1000)
+    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-11, maxiter=1000,iota=-1.9,G=G0,constraint_weight=10)
     end_time1 = time()
     if plot:
         items=coils.copy()
@@ -681,6 +681,91 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
 
 
 
+def coil_to_axis_qfm_both(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,rz0=None,phi0=0,rtol=1e-8, plot=False,**kwargs):
+    '''
+    输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
+    curve_input: (k, N) 或者CurveXYZFourier类
+    currents: (k,) 
+    nfp: int
+    stellsym: bool
+    ''' 
+
+
+    # 生成线圈
+    start_time = time()
+    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
+    if rz0 is None:
+        rz0=[coil2rz0(coils[0]),0]
+    print(f'initial guess:rz0={rz0}')
+    for coil in coils:
+        coil.fix_all()  
+
+    #用磁场找到磁轴
+    # plotting.plot(coils,show=True)
+
+    # cpcoils=from_simsopt(coils)
+    ma=fullax(coils,rz0=rz0,phi0=phi0,rtol=rtol,**kwargs)
+    # plotting.plot([ma]+coils,show=True)
+
+	#biotsavart算磁场,累加电流
+    bs = BiotSavart(coils)
+    bs_tf = BiotSavart(coils)
+    current_sum = sum(i for i in currents)
+    G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
+
+    mpol = surfaceorder  
+    ntor = surfaceorder  
+    phis = np.linspace(0, 1/nfp, 2*ntor+1, endpoint=False)
+    thetas = np.linspace(0, 1, 2*mpol+1, endpoint=False)
+    surf = SurfaceXYZTensorFourier(
+    mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
+    # surf.least_squares_fit(surfRZ.gamma())
+    surf.fit_to_curve(ma, 0.02, flip_theta=True)
+    #########第一步
+
+    tf = ToroidalFlux(surf, bs_tf)
+    tf_target = tf.J()
+
+    qfm_surface = QfmSurface(bs, surf, tf, tf_target)
+    qfm = QfmResidual(surf, bs)
+    res = qfm_surface.minimize_qfm_penalty_constraints_LBFGS(tol=1e-19, maxiter=1000,
+                                                            constraint_weight=1)
+    end_time1 = time()                                                        
+    print(f"第一步qfm, ||tf constraint||={0.5*(tf.J()-tf_target)**2:.8e}, ||residual||={np.linalg.norm(qfm.J()):.8e}, 运行时间：{end_time1 - start_time:.4f} 秒")
+    if plot:
+        items=coils.copy()
+        items.append(surf)
+        items.append(ma)
+        plotting.plot(items,show=False)  
+        plt.savefig('qfm1.png')
+        savefocusinput(surf,None,'qfm1.boundary')
+    #########第二步
+
+    res = qfm_surface.minimize_qfm_exact_constraints_SLSQP(tol=1e-19, maxiter=1000)
+
+
+
+
+    haveaxis = False
+    
+    if np.linalg.norm(qfm.J())<1e-12:
+        haveaxis = True
+    if plot:
+        items=coils.copy()
+        items.append(surf)
+        items.append(ma)
+        plotting.plot(items,show=False)  
+        plt.savefig('qfm2.png')
+        savefocusinput(surf,None,'qfm2.boundary')
+    end_time2 = time()
+    
+    print(f"第二步qfm, ||tf constraint||={0.5*(tf.J()-tf_target)**2:.8e}, ||residual||={np.linalg.norm(qfm.J()):.8e}, 运行总时间：{end_time2 - start_time:.4f} 秒")
+
+
+    return haveaxis,'qfm',np.linalg.norm(qfm.J())
+
+
+
 
 
 if __name__ == "__main__":
@@ -696,7 +781,7 @@ if __name__ == "__main__":
     [surfaces, coils] = load(f'/home/zhouyebi/code/project/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
     # savefocusinput(surfaces[-1],coils)
     num=int(len(coils)/2/surfaces[0].nfp)
-    haveaxis,iota,qs_error=coil_to_axis_qfm([c.curve for c in coils[0:num]],[c.current.get_value() for c in coils[0:num]],rz0=[1.306,0],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
+    haveaxis,iota,qs_error=coil_to_axis_qfm_both([c.curve for c in coils[0:num]],[c.current.get_value() for c in coils[0:num]],nfp=surfaces[0].nfp,rz0=[1.306,0],rtol=1e-8,phi0=0,method='BDF',plot=True)
 
     # #,method='BDF'
 
