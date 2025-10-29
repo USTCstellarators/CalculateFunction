@@ -12,38 +12,34 @@ from fieldline import fullax,from_simsopt,poincareplot
 from simsopt._core.util import Struct
 from mymisc import coil2rz0
 import matplotlib.pyplot as plt
+
 def generate_coils(curve_input, currents, nfp=1, stellsym=True):
     """
-    根据 curve_input 与 currents 生成带对称性的 coils 对象。
-    支持两种用法：
-      A) curve_input = 基线圈列表(k_base)，currents = k_base
-      B) curve_input = 已展开后的全部线圈(k_full)，currents = k_base
-         若满足 k_full == k_base * nfp * (2 if stellsym else 1)，自动复制电流
-
-    返回：coils（可用于 Biot–Savart）
+    简化版：统一将输入的曲线数组转为 simsopt 曲线对象，然后交由 simsopt 处理对称展开。
+    假设 curve_input 提供的是“基线圈”，currents 与其数量匹配。
     """
 
     def _as_curve_list(curve_input):
-        # 统一出曲线列表，以及每根曲线的 order
+        # 若已经是 CurveXYZFourier 或其列表，直接返回
         if isinstance(curve_input, CurveXYZFourier):
-            return [curve_input], curve_input.order
-        if isinstance(curve_input, (list, tuple)) and len(curve_input) and isinstance(curve_input[0], CurveXYZFourier):
-            return list(curve_input), curve_input[0].order
+            return [curve_input]
+        if isinstance(curve_input, (list, tuple)) and isinstance(curve_input[0], CurveXYZFourier):
+            return list(curve_input)
+        
+        # 否则尝试转换数组为 CurveXYZFourier 列表
         arr = np.asarray(curve_input)
         if arr.ndim == 2:  # (k, N) dofs
             k, N = arr.shape
             order = int((N - 3) // 6) if N > 3 else 0
             quad = max(1, 15 * max(order, 1))
-            curves = []
-            for i in range(k):
-                c = CurveXYZFourier(quadpoints=quad, order=order)
-                c.set_dofs(arr[i])
-                curves.append(c)
-            return curves, order
-        if arr.ndim == 3:  # (k, 3, 2*m+1)
+            return [
+                CurveXYZFourier(quadpoints=quad, order=order).set_dofs(arr[i]) or CurveXYZFourier(quadpoints=quad, order=order)
+                for i in range(k)
+            ]
+        elif arr.ndim == 3:  # (k, 3, 2*m+1)
             k, xyz, N = arr.shape
             if xyz != 3:
-                raise ValueError("curve_input shape 必须为 (k,3,N)")
+                raise ValueError("curve_input 的 shape 应为 (k, 3, N)")
             order = (N - 1) // 2
             quad = max(1, 15 * max(order, 1))
             curves = []
@@ -52,96 +48,38 @@ def generate_coils(curve_input, currents, nfp=1, stellsym=True):
                 c = CurveXYZFourier(quadpoints=quad, order=order)
                 c.set_dofs(dofs)
                 curves.append(c)
-            return curves, order
-        raise TypeError("curve_input 必须是 CurveXYZFourier、(k,N) 或 (k,3,N) 数组")
+            return curves
+        else:
+            raise TypeError("curve_input 必须是 CurveXYZFourier 或可转换的数组")
 
     def _to_current_obj_list(vals):
-        """把电流元素统一成 simsopt 的 Current/ScaledCurrent/兼容对象列表（保留已是对象的情况）"""
+        """将电流列表转换为 simsopt Current 对象"""
         arr = np.asarray(vals, dtype=object).ravel()
         out = []
         for c in arr:
-            if isinstance(c, numbers.Number) or (np.isscalar(c) and not isinstance(c, (str, bytes))):
+            if isinstance(c, numbers.Number):
                 out.append(SOCurrent(float(c)))
-                continue
-            has_get = hasattr(c, "get_value") and callable(getattr(c, "get_value"))
-            has_vjp = hasattr(c, "vjp") and callable(getattr(c, "vjp"))
-            if has_get and has_vjp:
+            elif hasattr(c, "get_value") and hasattr(c, "vjp"):
                 out.append(c)
-                continue
-            try:
-                out.append(SOCurrent(float(c)))
-            except Exception as e:
-                raise TypeError(
-                    "currents 中的元素既不是数值，也不是 Current/ScaledCurrent 兼容对象，"
-                    f"并且无法转换为 float：{type(c)}"
-                ) from e
+            else:
+                try:
+                    out.append(SOCurrent(float(c)))
+                except Exception as e:
+                    raise TypeError(f"无法将电流值 {c} 转换为 Current 对象") from e
         return out
 
-    # ---- 曲线表与数量 ----
-    base_curves, order = _as_curve_list(curve_input)
-    k = len(base_curves)
+    base_curves = _as_curve_list(curve_input)
+    current_list = _to_current_obj_list(currents)
 
-    # ---- 处理电流数量匹配 ----
-    curr_in = np.asarray(currents, dtype=object).ravel()
-    m = curr_in.size  # 提供的电流个数（可能是基线圈数）
+    if len(base_curves) != len(current_list):
+        raise ValueError(f"曲线数量 {len(base_curves)} 与电流数量 {len(current_list)} 不一致")
 
-    sym_factor = int(nfp) * (2 if stellsym else 1)
-
-    if m == k:
-        # 情况1：电流数量与曲线数一致
-        curr_list = _to_current_obj_list(curr_in)
-    elif sym_factor > 0 and (k % sym_factor == 0) and (m == k // sym_factor):
-        # 情况2：电流数量是“基线圈数”，而曲线是已经展开到全部线圈
-        # 这里按对称因子复制：每个基线圈的电流 → 复制 nfp*(stellsym?2:1) 次
-        curr_base = _to_current_obj_list(curr_in)
-        # 注意：若 curr_base 里有 Current/ScaledCurrent 对象，复制引用即可（和曲线实例一一对应）
-        curr_list = list(np.tile(curr_base, sym_factor))
-    else:
-        # 情况3：不匹配，明确报错，提示如何修正
-        raise ValueError(
-            f"currents 长度={m} 与曲线数 k={k} 不匹配；"
-            f"若 currents 是基线圈电流，请确保 k == m * nfp * (2 if stellsym else 1)；"
-            f"当前 nfp={nfp}, stellsym={stellsym} → 期望 k == {m} * {sym_factor} = {m*sym_factor}。"
-        )
-
-    print(f"coils number: {k}, order={order}, nfp={nfp}, stellsym={stellsym}")
-
-
-
-
-    # 若 curve_input 本身是“基线圈”，推荐把“基线圈+电流”交给 simsopt 去做对称展开：
-    #   coils = coils_via_symmetries(base_curves, curr_base, nfp, stellsym)
-    # 但此处你的 curve_input 已经是“全部线圈”时，我们直接把它们和 curr_list 传进去也是可以的。
-    # coils_via_symmetries 会再做一次展开；所以为了不重复展开，这里应传“基线圈+基电流”。
-    # 判断是否为“已展开”的输入：k == m * sym_factor（当我们刚刚复制过）
-   
-   
-    # 识别“是否已展开”的更稳妥判断
-    is_full = (k == m * sym_factor)
-
-    if is_full:
-        # 情况A：curve_input 已包含全部线圈（数量等于 基线圈数*对称数）
-        # 这里不要再展开；若一定要用 coils_via_symmetries，就用前 m 根作为基线圈来重建
-        curr_base = _to_current_obj_list(curr_in)
-        base_curves_for_expand = base_curves[:m]
-        coils = coils_via_symmetries(base_curves_for_expand, curr_base, nfp, stellsym)
-    elif m == k:
-        # 情况B：看起来是“基线圈+对应电流”，应当根据 nfp/stellsym 去展开
-        curr_list = _to_current_obj_list(curr_in)
-        coils = coils_via_symmetries(base_curves, curr_list, nfp, stellsym)
-    else:
-        # 情况C：你上面已经处理了 m == k//sym_factor 的复制情形；
-        # 这里保持原逻辑：用“基线圈+基电流”让 simsopt 展开一次
-        k_base = m
-        base_curves_for_expand = base_curves[:k_base] if (k == k_base * sym_factor) else base_curves
-        curr_base = _to_current_obj_list(curr_in)
-        coils = coils_via_symmetries(base_curves_for_expand, curr_base, nfp, stellsym)
-
-
+    coils = coils_via_symmetries(base_curves, current_list, nfp=nfp, stellsym=stellsym)
+    print(f'生成nfp={nfp}, Stellsym={stellsym}, 总共{len(coils)}个线圈')
     return coils
 
 
-def coil_surface_to_para(surfaces,curve_input,currents):
+def coil_surface_to_para(curve_input,currents,surfaces):
 	#生成线圈
 
     nfp=surfaces[-1].nfp
@@ -149,9 +87,7 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
     base_curves=[c.curve for c in coils]
     #biotsavart算磁场,累加电流
-    coils = generate_coils(curve_input, currents, nfp=nfp, stellsym=stellsym)
-    base_curves=[c.curve for c in coils]
-    #biotsavart算磁场,累加电流
+
     bs = BiotSavart(coils)
     current_sum = sum(i for i in currents)   
     G0 = 2. * np.pi * current_sum * (4 * np.pi * 10**(-7) / (2 * np.pi))
@@ -162,17 +98,15 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     qs_error=0
     for s in surfaces:
 
-        
+        print('start')
         volume = Volume(s)
         vol_target = volume.J()
 
         boozer_surface = BoozerSurface(bs, s, volume, vol_target)
 
         start_time = time()
-        start_time = time()
-        res = boozer_surface.solve_residual_equation_exactly_newton(tol=1e-12, maxiter=100)
+        res = boozer_surface.minimize_boozer_exact_constraints_newton(tol=1e-12,G=G0, maxiter=100)
         qs_error+=NonQuasiSymmetricRatio(boozer_surface, BiotSavart(coils)).J() 
-        end_time = time()
         end_time = time()
        
         residual_norm = np.linalg.norm(boozer_surface_residual(boozer_surface.surface, res["iota"], res["G"], bs, derivatives=0))
@@ -192,7 +126,6 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     volume=volume.J()
 
     lgb,_=L_grad_B(coils,surface)
-    lgb,_=L_grad_B(coils,surface)
     lgb_min=np.min(lgb)
     curvature= [[c.kappa()] for c in base_curves]
     max_curvature = np.max(curvature)
@@ -201,7 +134,6 @@ def coil_surface_to_para(surfaces,curve_input,currents):
     length = [CurveLength(c).J() for c in base_curves]
     length=np.array(length)
     total_length=np.sum(length)
-    curvesurfacedistance=distance_cp(surface,coils)
     curvesurfacedistance=distance_cp(surface,coils)
     
 
@@ -390,7 +322,7 @@ def coil_to_para(curve_input, currents, ma=None, nfp=1,stellsym=True,surfaceorde
     return plasma_para,coil_para
 
 
-def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=None,phi0=0,rtol=1e-8, plot=False,**kwargs):
+def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=None,phi0=0,rtol=1e-6, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -448,19 +380,23 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
 
     
     #####第一步
-    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=10000,iota=-1.9,G=G0,constraint_weight=1000)
+    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=100,iota=-1.9,G=G0,constraint_weight=1000)
     end_time1 = time()
     if plot:
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=False)  
-        plt.savefig('boozer1.png')
+        plotting.plot(items)  
+
+        # plotting.plot(items,show=False)  
+        # plt.savefig('boozer1.png')
     haveaxis = False
     residual_norm= np.linalg.norm(boozer_surface_residual(surf, res["iota"], res["G"], bs, derivatives=0))
     if residual_norm<1e-9:
         haveaxis = True
     print(f"第一步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行时间：{end_time1 - start_time:.4f} 秒")
+    
+    
     #####第二步
     surf2 = SurfaceXYZTensorFourier(
     mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)
@@ -507,12 +443,13 @@ def coil_to_axis(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=N
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=False)  
-        plt.savefig('boozer2.png') 
+        plotting.plot(items)  
+        # plotting.plot(items,show=False)  
+        # plt.savefig('boozer2.png') 
     return haveaxis,iota,qs_error
 
 
-def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=None,phi0=0,rtol=1e-8, plot=False,**kwargs):
+def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz0=None,phi0=0,rtol=1e-6, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -590,7 +527,7 @@ def coil_to_axis_ar(curve_input, currents, nfp=1,stellsym=True,surfaceorder=6,rz
     return haveaxis,iota,qs_error
 
 
-def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,rz0=None,phi0=0,rtol=1e-8, plot=False,**kwargs):
+def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,rz0=None,phi0=0,rtol=1e-6, plot=False,**kwargs):
     '''
     输入k个傅里叶模数为n的线圈, 输出磁轴存在与否, 以及磁轴附近iota和qs_error
     curve_input: (k, N) 或者CurveXYZFourier类
@@ -638,21 +575,22 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
     qfm_surface = QfmSurface(bs, surf, tf, tf_target)
     qfm = QfmResidual(surf, bs)
     res = qfm_surface.minimize_qfm_penalty_constraints_LBFGS(tol=1e-12, maxiter=1000,
-                                                            constraint_weight=1000)
+                                                            constraint_weight=100)
     end_time1 = time()                                                        
     print(f"第一步qfm, ||tf constraint||={0.5*(tf.J()-tf_target)**2:.8e}, ||residual||={np.linalg.norm(qfm.J()):.8e}, 运行时间：{end_time1 - start_time:.4f} 秒")
     if plot:
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=False)  
-        plt.savefig('qfm.png')
+        plotting.plot(items)  
+        # plotting.plot(items,show=False)  
+        # plt.savefig('qfm.png')
     #########第二步
     volume = Volume(surf)
     vol_target=volume.J()
     # vol_target=-0.001
     boozer_surface = BoozerSurface(bs, surf, volume, vol_target)
-    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, maxiter=100)
+    res = boozer_surface.minimize_boozer_penalty_constraints_LBFGS(tol=1e-10, iota=-1.9,G=G0,maxiter=1000)
 
     boozer_surface.need_to_run_code = True
 
@@ -666,8 +604,9 @@ def coil_to_axis_qfm(curve_input, currents, nfp=1,stellsym=True,surfaceorder=8,r
         items=coils.copy()
         items.append(surf)
         items.append(ma)
-        plotting.plot(items,show=False)  
-        plt.savefig('boozer.png')
+        plotting.plot(items)  
+        # plotting.plot(items,show=False)  
+        # plt.savefig('boozer.png')
     end_time2 = time()
     
     print(f"第二步: iota={res['iota']:.3f}, vol_target={vol_target}, volume={volume.J()}, residual={residual_norm:.3e}, haveaxis={haveaxis}, 运行总时间：{end_time2 - start_time:.4f} 秒")
@@ -686,15 +625,19 @@ if __name__ == "__main__":
     from simsopt.geo import plotting
     from simsopt._core import load, save
 
-    ID = 1857206# ID可在scv文件中找到索引，以958为例
+    ID = 1940007# ID可在scv文件中找到索引，以958为例
 
     fID = ID // 1000 
-    [surfaces, coils] = load(f'/home/zhouyebi/code/project/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
+    [surfaces, coils] = load(f'/home/zhouyewsl/code/projects/QUASR_08072024/simsopt_serials/{fID:04}/serial{ID:07}.json')
+    print(len(coils))
+    num=int(len(coils)/2/surfaces[0].nfp)
+    coil_surface_to_para([c.curve for c in coils[0:num]],[c.current.get_value() for c in coils[0:num]],surfaces)
 
-    haveaxis,iota,qs_error=coil_to_axis([c.curve for c in coils[0:3]],[c.current.get_value() for c in coils[0:3]],rz0=[1.306,0],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
+    haveaxis,iota,qs_error=coil_to_axis_qfm([c.curve for c in coils[0:3]],[c.current.get_value() for c in coils[0:3]],nfp=surfaces[0].nfp,phi0=0,method='BDF',plot=True)
 
     #,method='BDF'
-
+    
+    
 
     print(haveaxis)
     print(iota)

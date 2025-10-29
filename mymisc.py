@@ -349,9 +349,6 @@ def plot3D(fieldline,show=True):
     plt.tight_layout()
     if show:
         plt.show()
-
-import numpy as np
-
 def shell_sort(a, n, m):
     k = m // 2
     while k > 0:
@@ -372,23 +369,23 @@ def shell_sort(a, n, m):
 def rz_resort(R_sorted, Z_sorted, nfp):
     """
     将 RZ 网格映射到 1/(2*nfp) 基本单元，不重新排序
-    
+
     Parameters:
     - R_sorted, Z_sorted: shape (n, m) 原始 RZ 网格，n=toroidal点数，m=poloidal点数
     - nfp: field periods
-    
+
     Returns:
     - R_unit, Z_unit: shape (n_unit, m)
     """
     n, m = R_sorted.shape
     unit = np.pi / nfp  # 基本单元大小
-    
+
     # 生成 phi 对应每行
     phi = np.linspace(0, 2*np.pi, n, endpoint=False)
-    
+
     # 对偶数单元保持，奇数单元镜像
     flip = ((phi // unit).astype(int) % 2)
-    
+
     R_unit = []
     Z_unit = []
     for i in range(n):
@@ -398,17 +395,106 @@ def rz_resort(R_sorted, Z_sorted, nfp):
             if flip[i] == 1:
                 Z_i = -Z_i
             Z_unit.append(Z_i)
-    
+
     R_unit = np.array(R_unit)
     Z_unit = np.array(Z_unit)
-    
+
     return R_unit, Z_unit
+
+def rz_resort_full(R_sorted, Z_sorted, nfp):
+    """
+    改进版 rz_resort: 保留所有 toroidal 点 (不截断)
+    同时在奇偶 field period 间保持上下翻转对称。
+    """
+    n, m = R_sorted.shape
+    unit = np.pi / nfp  # 单个基本单元大小
+    phi = np.linspace(0, 2*np.pi, n, endpoint=False)
+
+    R_out = np.zeros_like(R_sorted)
+    Z_out = np.zeros_like(Z_sorted)
+
+    for i in range(n):
+        # 判断当前点属于第几个基本单元
+        cell_index = int(phi[i] // unit)
+        # 奇偶单元交替翻转 Z
+        if cell_index % 2 == 1:
+            Z_out[i, :] = -Z_sorted[i, :]
+        else:
+            Z_out[i, :] = Z_sorted[i, :]
+        R_out[i, :] = R_sorted[i, :]
+
+    return R_out, Z_out
+
+
+def fieldline2gamma(fieldline, axisline, m, n, nfp):
+    """
+    将 fieldline 数据按 poloidal 排序，并返回 (phi, theta, xyz) 网格
+
+    Parameters:
+    - fieldline: (n*m, 4) array, columns: [x, y, z, φ]
+    - axisline: (n+1, 4) array, columns: [x, y, z, φ]
+    - m: poloidal resolution (numquadpoints_theta)
+    - n: toroidal resolution (numquadpoints_phi)
+    - nfp: number of field periods
+
+    Returns:
+    - xyz: (m, n/2/nfp, 3) array
+    """
+
+    # 提取 R 和 Z
+    R = np.zeros((n, m))
+    Z = np.zeros((n, m))
+    for i in range(n):
+        for j in range(m):
+            idx = i + j * n
+            x, y, z = fieldline[idx, 0], fieldline[idx, 1], fieldline[idx, 2]
+            R[i, j] = np.sqrt(x**2 + y**2)
+            Z[i, j] = z
+
+    # 计算 poloidal angle theta
+    raxis = np.sqrt(axisline[n // (2 * nfp), 0]**2 + axisline[n // (2 * nfp), 1]**2)
+    zaxis = 0.0
+    theta = np.zeros(m)
+    for j in range(m):
+        theta[j] = np.arctan2(Z[n // (2 * nfp), j] - zaxis, R[n // (2 * nfp), j] - raxis)
+        if theta[j] < 0:
+            theta[j] += 2 * np.pi
+
+    # 排序
+    R1 = np.zeros((n+1, m))
+    Z1 = np.zeros((n+1, m))
+    R1[:n, :] = R
+    Z1[:n, :] = Z
+    R1[n, :] = theta
+    Z1[n, :] = theta
+    R_sorted = shell_sort(R1, n, m)[:n, :]
+    Z_sorted = shell_sort(Z1, n, m)[:n, :]
+
+    # R_sorted,Z_sorted = rz_resort_full(R_sorted, Z_sorted, nfp)
+    # phi = np.linspace(0, np.pi/nfp, n, endpoint=False)  # 基本单元
+
+
+    R_sorted,Z_sorted = rz_resort(R_sorted, Z_sorted, nfp)
+    phi = np.linspace(0, np.pi/nfp, n // (2 * nfp), endpoint=False)  # 基本单元
+
+    # 更新 X, Y, Z 数组
+    X = R_sorted * np.cos(phi[:, None])
+    Y = R_sorted * np.sin(phi[:, None])
+    Z = Z_sorted
+
+    # 将输出的形状改为 (m, n, 3)
+    XYZ = np.stack([X, Y, Z], axis=-1)  # shape (n, m, 3)
+
+    # 转置为 (m, n, 3)
+    XYZ = np.transpose(XYZ, (1, 0, 2))
+    print("原始 n =", n, "输出 shape =", XYZ.shape)
+    return XYZ
 
 
 def fieldline2rz(fieldline, axisline, m, n, nfp):
     """
     将 fieldline 数据按 poloidal 排序，并返回 (phi, theta, xyz) 网格
-    
+
     Parameters:
     - fieldline: (n*m, 4) array, columns: [x, y, z, φ]
     - axisline: (n+1, 4) array, columns: [x, y, z, φ]
@@ -447,61 +533,6 @@ def fieldline2rz(fieldline, axisline, m, n, nfp):
     R_sorted = shell_sort(R1, n, m)[:n, :]
     Z_sorted = shell_sort(Z1, n, m)[:n, :]
     return R_sorted,Z_sorted#rz_resort(R_sorted,Z_sorted,nfp)
-
-def fieldline2gamma(fieldline, axisline, m, n, nfp):
-    """
-    将 fieldline 数据按 poloidal 排序，并返回 (phi, theta, xyz) 网格
-    
-    Parameters:
-    - fieldline: (n*m, 4) array, columns: [x, y, z, φ]
-    - axisline: (n+1, 4) array, columns: [x, y, z, φ]
-    - m: poloidal resolution (numquadpoints_theta)
-    - n: toroidal resolution (numquadpoints_phi)
-    - nfp: number of field periods
-    
-    Returns:
-    - xyz: (n, m, 3) array
-    """
-
-    # 提取 R 和 Z
-    R = np.zeros((n, m))
-    Z = np.zeros((n, m))
-    for i in range(n):
-        for j in range(m):
-            idx = i + j * n
-            x, y, z = fieldline[idx, 0], fieldline[idx, 1], fieldline[idx, 2]
-            R[i, j] = np.sqrt(x**2 + y**2)
-            Z[i, j] = z
-
-    # 计算 poloidal angle theta
-    raxis = np.sqrt(axisline[n // (2 * nfp), 0]**2 + axisline[n // (2 * nfp), 1]**2)
-    zaxis = 0.0
-    theta = np.zeros(m)
-    for j in range(m):
-        theta[j] = np.arctan2(Z[n // (2 * nfp), j] - zaxis, R[n // (2 * nfp), j] - raxis)
-        if theta[j] < 0:
-            theta[j] += 2 * np.pi
-
-    # 排序
-    R1 = np.zeros((n+1, m))
-    Z1 = np.zeros((n+1, m))
-    R1[:n, :] = R
-    Z1[:n, :] = Z
-    R1[n, :] = theta
-    Z1[n, :] = theta
-    R_sorted = shell_sort(R1, n, m)[:n, :]
-    Z_sorted = shell_sort(Z1, n, m)[:n, :]
-    R_sorted,Z_sorted= rz_resort(R_sorted,Z_sorted,nfp)
-    phi = np.linspace(0, np.pi/nfp, n // (2 * nfp), endpoint=False)  # 基本单元
-
-    X = R_sorted * np.cos(phi[:, None])
-    Y = R_sorted * np.sin(phi[:, None])
-    Z = Z_sorted
-
-    XYZ = np.stack([X, Y, Z], axis=-1)  # shape (n, m, 3)
-    return XYZ
-
-
 
 def rz2surface(R, Z, nfp, mpol, ntor):
     """
@@ -633,7 +664,7 @@ def xyz2surface(XYZ, nfp,  mpol, ntor):
     return surf
 
 
-def gamma2volume(gamma):
+def gamma2volume(gamma,nfp=1,stellsym=False):
     """
     由 (n_phi, n_theta, 3) 表面网格 gamma 计算封闭体体积。
     假设 phi、theta 在 [0, 2π) 上均匀、周期采样。

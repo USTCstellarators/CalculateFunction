@@ -103,7 +103,7 @@ def tracing(
         except ZeroDivisionError:
             return [0.0, 0.0]
 
-        eps = 1e-9
+        eps = 1e-10
         if not np.isfinite(Bphi) or abs(Bphi) < eps:
             return [0.0, 0.0]
         return [Br/Bphi, Bz/Bphi]
@@ -231,8 +231,8 @@ def fullax(coils,rz0=None,phi0=0,nfp=1,bounds=None,order=10,niter=1, nstep=10,me
 
 
 def findax(coils,rz0=None,phi0=0,nfp=1,bounds=None,rtol=1e-6,method='BDF',plot=False):
-    # if bounds is None:
-    #     bounds=[(rz0[0]-0.3,rz0[0]+0.3),(-0.01,0.01)]
+    if bounds is None:
+        bounds=[(rz0[0]-0.2,rz0[0]+0.2),(-0.001,0.001)]
     coils=from_simsopt(coils)
     # if rz0==None:
     #     rz0=[findrz0(coils),0]
@@ -263,7 +263,7 @@ def findax(coils,rz0=None,phi0=0,nfp=1,bounds=None,rtol=1e-6,method='BDF',plot=F
         #print(r)
         lines=None
         return r
-    res=minimize(fun,rz0,method='COBYQA',bounds=bounds)
+    res=minimize(fun,rz0,method='powell',bounds=bounds)
     print(res)
     return res.x
 

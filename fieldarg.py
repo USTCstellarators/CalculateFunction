@@ -117,17 +117,21 @@ def L_grad_B(cs,s=None,po=None):
     # 找最小值和对应坐标
     min_idx = np.argmin(L_grad_B)
     min_point = po[min_idx]
-    # 计算 min_point 的 (theta_idx, phi_idx)
     theta_idx, phi_idx = np.unravel_index(min_idx, (m, n))
-
-    # 生成 theta 和 phi 网格（与主脚本一致）
     theta_vals = np.linspace(0, 2*np.pi, m, endpoint=False)
-    phi_vals = np.linspace(0, 2*np.pi, n, endpoint=False)
-
+    # phi_vals = np.linspace(0, 2*np.pi, n, endpoint=False)
     theta_min = theta_vals[theta_idx]
-    phi_min = phi_vals[phi_idx]
+    # phi_min = phi_vals[phi_idx]
+
+
+    # 使用三角函数计算theta, phi
+    x, y, z = min_point
+    phi_min = np.arctan2(y, x)
+    phi_min = phi_min if phi_min >= 0 else phi_min + 2*np.pi
+
 
     return L_grad_B, min_point, theta_min, phi_min
+
 
 
 def distance_cp(s, cs): 
