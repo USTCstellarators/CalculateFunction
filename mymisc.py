@@ -1,6 +1,6 @@
 import numpy as np
 import inspect
-from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZTensorFourier,CurveRZFourier
+from simsopt.geo import SurfaceRZFourier,plotting,SurfaceXYZTensorFourier,CurveRZFourier,CurveXYZFourier
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import os
@@ -188,18 +188,28 @@ def nml_to_focus(nml_filename, focus_filename, nfp=2):
     print(f" 成功将 {bmn} 项输出至 {focus_filename}(NFP = {nfp})")
 
 
-def savefocussurface(surf, filename, nfp=1, mode=None):
+def savefocusinput(surf,coils=None, surfacename=None,coilname=None, nfp=None, mode=None):
+    from simsopt.field import coils_to_focus
     tempfile = "temp.nml"
+    if nfp is None:
+        nfp=surf.nfp
+    if surfacename is None:
+        surfacename='poincare.boundary'
+    if coilname is None:
+        coilname='poincare.focus'
     try:
         surf = surf.to_RZFourier()
         if mode is not None:
             surf.change_resolution(mode[0], mode[1])
         surf.write_nml(tempfile)
-        nml_to_focus(tempfile, filename, nfp=surf.nfp)
+        nml_to_focus(tempfile, surfacename, nfp=surf.nfp)
     finally:
         if os.path.exists(tempfile):
             os.remove(tempfile)
-
+    if coils is not None:
+        num=int(len(coils)/2/surf.nfp)
+        assert isinstance(coils[0].curve, CurveXYZFourier)
+        coils_to_focus(coilname,[c.curve for c in coils[0:num]],[c.current for c in coils[0:num]], nfp=surf.nfp, stellsym=True, Ifree=False, Lfree=False)
 
 def rzp2curverz(lines,order=10):
     if not isinstance(lines, (list, np.ndarray)) or len(lines) == 0:
