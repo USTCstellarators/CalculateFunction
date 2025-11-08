@@ -200,7 +200,6 @@ def tracingFULL(
     return np.array(lines)
 
 
-
 def fullax(coils,rz0=None,phi0=0,nfp=1,bounds=None,order=10,niter=1, nstep=10,method='BDF',rtol=1e-6,plot=False):
     # if bounds is None:
     #     bounds=[(rz0[0]-0.5,rz0[0]+  0.5),(-0.01,0.01)]
@@ -231,11 +230,12 @@ def fullax(coils,rz0=None,phi0=0,nfp=1,bounds=None,order=10,niter=1, nstep=10,me
 
 
 def findax(coils,rz0=None,phi0=0,nfp=1,bounds=None,rtol=1e-6,method='BDF',plot=False):
+
+    coils=from_simsopt(coils)
+    if rz0==None:
+        rz0=[findrz0(coils),0]
     if bounds is None:
         bounds=[(rz0[0]-0.2,rz0[0]+0.2),(-0.001,0.001)]
-    coils=from_simsopt(coils)
-    # if rz0==None:
-    #     rz0=[findrz0(coils),0]
     ##for coilpy coils
     def field(pos):
         b=0
@@ -368,7 +368,7 @@ def run_fieldline_tracing(curves, currents, ma, s, nfp=3, nfieldlines=10, tmax_f
         t2 = time.time()
         print(f"Time for fieldline tracing={t2-t1:.3f}s. Num steps={sum(len(l) for l in fieldlines_tys) // nfieldlines}", flush=True)
         plot_poincare_data(fieldlines_phi_hits, phis, os.path.join(out_dir, f'poincare_fieldline_{label}.png'), dpi=150)
-        
+
         if save_data:
             np.savez(os.path.join(out_dir, f'fieldlines_{label}.npz'),
                      tys=fieldlines_tys,
@@ -502,4 +502,3 @@ if __name__ == "__main__":
 
 
     plt.show()
-
