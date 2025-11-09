@@ -735,45 +735,43 @@ if __name__ == "__main__":
 
 
     nfp=surfaces[0].nfp
-    constraint_weight=1e4
+    constraint_weight=1e2
     rtol=1e-8
     method='BDF'
     plot=True
-
+    stellsym=True
     surfaceorder=6
 
     print(len(coils))
 
 
-    ma=fullax(coils,phi0=0,rtol=rtol)
+    ma=fullax(coils,phi0=0,rz0=[1.34,0],rtol=rtol)
     plotting.plot([ma]+coils,show=True)
 
 	# #biotsavart算磁场,累加电流
     bs = BiotSavart(coils)
     bs_tf = BiotSavart(coils)
+    start_time = time()
 
     mpol = surfaceorder  
     ntor = surfaceorder  
     phis = np.linspace(0, 1/nfp, 2*ntor+1, endpoint=False)
     thetas = np.linspace(0, 1, 2*mpol+1, endpoint=False)
     surf = SurfaceXYZTensorFourier(
-    mpol=surfaceorder, ntor=surfaceorder, stellsym=True, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
+    mpol=surfaceorder, ntor=surfaceorder, stellsym=stellsym, nfp=nfp, quadpoints_phi=phis, quadpoints_theta=thetas)#
     # surf.least_squares_fit(surfRZ.gamma())
-    surf.fit_to_curve(ma, 0.1, flip_theta=True)
+    surf.fit_to_curve(ma, 0.05, flip_theta=True)
     #########第一步
 
-
-    # surf=surfaces[3]
-    tf = ToroidalFlux(surf, bs_tf)
-    tf_target = tf.J()
-
-    # tf = Area(surf)
+    # tf = ToroidalFlux(surf, bs_tf)
     # tf_target = tf.J()
+
+    tf = Area(surf)
+    tf_target = tf.J()
 
     qfm_surface = QfmSurface(bs, surf, tf, tf_target)
     qfm = QfmResidual(surf, bs)
-    start_time = time()
-    res = qfm_surface.minimize_qfm_penalty_constraints_LBFGS(tol=1e-33, maxiter=10000,
+    res = qfm_surface.minimize_qfm_penalty_constraints_LBFGS(tol=1e-7, maxiter=1000,
                                                             constraint_weight=constraint_weight)
     end_time1 = time()                                                        
     print(f"第一步qfm, ||tf constraint||={0.5*(tf.J()-tf_target)**2:.8e}, ||residual||={np.linalg.norm(qfm.J()):.8e}, 运行时间：{end_time1 - start_time:.4f} 秒")
@@ -781,10 +779,31 @@ if __name__ == "__main__":
     if plot:
         items=coils.copy()
         items.append(surf)
-        # items.append(ma)
+        items.append(ma)
         plotting.plot(items,show=False)  
         plt.savefig('qfm1.png')
         plt.show()
         savefocusinput(surf,None,'qfm1.boundary')
 
+    #########第二步
 
+    res = qfm_surface.minimize_qfm_exact_constraints_SLSQP(tol=1e-10, maxiter=1000)
+
+
+
+
+    haveaxis = False
+
+    if np.linalg.norm(qfm.J())<1e-8:
+        haveaxis = True
+    if plot:
+        items=coils.copy()
+        items.append(surf)
+        items.append(ma)
+        plotting.plot(items,show=False)  
+        plt.savefig('qfm2.png')
+        plt.show()
+        savefocusinput(surf,None,'qfm2.boundary')
+    end_time2 = time()
+
+    print(f"第二步qfm, ||tf constraint||={0.5*(tf.J()-tf_target)**2:.8e}, ||residual||={np.linalg.norm(qfm.J()):.8e}, 运行总时间：{end_time2 - start_time:.4f} 秒")

@@ -4,6 +4,90 @@ from essos.coils import Coils_from_simsopt
 from essos.dynamics import Tracing
 from mymisc import rzp2curverznfp
 import numpy as np
+import os
+from time import time
+import jax.numpy as jnp
+from jax import block_until_ready
+import matplotlib.pyplot as plt
+from essos.fields import BiotSavart
+from essos.dynamics import Tracing
+from fieldline import findax
+
+
+def run_essos_tracing(
+    coils,
+    tmax= 1000,
+    nfieldlines_per_core= 3,
+    number_of_processors_to_use=3,
+    ma=None,
+    len=0.1,
+    trace_tolerance=1e-8,
+    num_steps=6000,
+    plot: bool = True,
+    save: bool = False,
+    outputname: str = "poincareplot.png"
+):
+    """
+    Run ESSOS magnetic field line tracing.
+
+    Parameters:
+    - coils: Coils object from ESSOS (e.g., from Coils_from_json)
+    - tmax: Maximum tracing time
+    - nfieldlines_per_core: Number of field lines per core
+    - number_of_processors_to_use: Number of processors (should divide total field lines)
+    - R0: 1D jnp array of initial R positions (length = number_of_processors_to_use * nfieldlines_per_core)
+    - trace_tolerance: Absolute and relative tolerance for tracer
+    - num_steps: Number of time steps
+    - plot: If True, plots the 3D trajectory and Poincaré section
+    - save_vtk: If True, saves output in .vtk format
+    - output_prefix: Prefix for VTK output files
+
+    Returns:
+    - tracing: ESSOS Tracing object
+    - trajectories: Traced trajectories (3D array)
+    """
+
+    # Set number of processors for JAX XLA
+    os.environ["XLA_FLAGS"] = f'--xla_force_host_platform_device_count={number_of_processors_to_use}'
+
+    # Derived parameters
+    nfieldlines = number_of_processors_to_use * nfieldlines_per_core
+    if ma==None:
+        ma=findax(coils)
+    R0 = jnp.linspace(ma[0],ma[0]+len, nfieldlines)
+    # Initial positions
+    Z0 = jnp.zeros(nfieldlines)
+    phi0 = jnp.zeros(nfieldlines)
+    initial_xyz = jnp.array([R0 * jnp.cos(phi0), R0 * jnp.sin(phi0), Z0]).T
+    coils_essos = Coils_from_simsopt(coils)
+    # Run tracing
+    time0 = time()
+    tracing = block_until_ready(Tracing(
+        field=BiotSavart(coils_essos),
+        model='FieldLineAdaptative',
+        initial_conditions=initial_xyz,
+        maxtime=tmax,
+        times_to_trace=num_steps,
+        atol=trace_tolerance,
+        rtol=trace_tolerance
+    ))
+    print(f"ESSOS tracing took {time() - time0:.2f} seconds")
+    trajectories = tracing.trajectories
+
+    # Plot results
+    if plot:
+        fig = plt.figure(figsize=(9, 5))
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax2 = fig.add_subplot(122)
+        tracing.plot(ax=ax1, show=False)
+        tracing.poincare_plot(ax=ax2, show=False, shifts=[0, jnp.pi / 2])
+        plt.tight_layout()
+        if save:
+            plt.savefig(outputname)
+        else:plt.show()
+
+
+    return tracing, trajectories
 
 
 
